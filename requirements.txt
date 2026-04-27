@@ -16,7 +16,7 @@ openai==1.75.0
 
 # Config
 pydantic-settings==2.8.2
-python-dotenv==1.2.2
+python-dotenv==1.1.0
 
 # Logging
 loguru==0.7.3
