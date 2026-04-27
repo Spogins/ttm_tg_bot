@@ -1,0 +1,68 @@
+# ─── Python ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# ─── Packaging ───────────────────────────────────────────────
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+wheels/
+
+# ─── Virtual environments ────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ─── Environment / secrets ───────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Tests & coverage ────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ─── Type checkers ───────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+.pytype/
+.pyre/
+
+# ─── IDE ─────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+
+# ─── Logs & dumps ────────────────────────────────────────────
+logs/
+*.log
+dumps/
+
+# ─── Database ────────────────────────────────────────────────
+*.db
+*.sqlite3
+init.sql
+db.json
+
+# ─── Docker ──────────────────────────────────────────────────
+docker-compose.override.yml
+
+# ─── OS ──────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Temp / test files ───────────────────────────────────────
+test.py
+test.txt
+test.json
+test.html
+.~lock.*
