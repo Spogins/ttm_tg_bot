@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     webapp_host: str = Field("0.0.0.0")
     webapp_port: int = Field(8080)
 
+    # Dev
+    dev_mode: bool = Field(False)
+
     # Token limits
     daily_token_limit: int = Field(30000)
     monthly_token_limit: int = Field(500000)
