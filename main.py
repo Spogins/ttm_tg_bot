@@ -3,6 +3,7 @@ import os
 
 from aiohttp import web
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiogram.types import BotCommand
 from loguru import logger
 
 from config.logging import setup_logging
@@ -10,6 +11,16 @@ from config.settings import settings
 from db.mongodb import connect as mongo_connect, disconnect as mongo_disconnect
 from db.qdrant import connect as qdrant_connect, disconnect as qdrant_disconnect
 from bot.setup import create_bot, create_dispatcher
+
+BOT_COMMANDS = [
+    BotCommand(command="start", description="Начать работу"),
+    BotCommand(command="help", description="Помощь"),
+    BotCommand(command="projects", description="Список проектов"),
+    BotCommand(command="estimate", description="Оценить задачу"),
+    BotCommand(command="sprint", description="Оценить задачи спринта"),
+    BotCommand(command="stats", description="Статистика"),
+    BotCommand(command="cancel", description="Отменить текущее действие"),
+]
 
 
 async def run_polling():
@@ -19,6 +30,7 @@ async def run_polling():
     bot = create_bot()
     dp = create_dispatcher()
 
+    await bot.set_my_commands(BOT_COMMANDS)
     logger.info("Starting in polling mode")
     try:
         await dp.start_polling(bot)
@@ -31,6 +43,7 @@ async def run_polling():
 async def on_startup(bot, dp):
     await mongo_connect()
     await qdrant_connect()
+    await bot.set_my_commands(BOT_COMMANDS)
     await bot.set_webhook(f"{settings.webhook_url}{settings.webhook_path}")
     logger.info(f"Webhook set: {settings.webhook_url}{settings.webhook_path}")
 

@@ -35,8 +35,7 @@ class VoiceTranscriptionMiddleware(BaseMiddleware):
                 await event.answer("Не удалось распознать речь. Попробуйте ещё раз.")
                 return
 
-            # подменяем текст сообщения чтобы хендлеры работали прозрачно
-            event.text = text
+            object.__setattr__(event, "text", text)
             logger.info(f"Voice transcribed for user {event.from_user.id}: {text[:60]}")
 
         except RuntimeError as e:

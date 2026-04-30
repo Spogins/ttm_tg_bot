@@ -10,7 +10,10 @@ aai.settings.api_key = settings.assemblyai_api_key
 
 
 def _transcribe_file(path: str) -> str:
-    config = aai.TranscriptionConfig(language_detection=True)
+    config = aai.TranscriptionConfig(
+        speech_models=["universal-3-pro", "universal-2"],
+        language_detection=True,
+    )
     transcriber = aai.Transcriber(config=config)
     transcript = transcriber.transcribe(path)
 
