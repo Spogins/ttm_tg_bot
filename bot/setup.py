@@ -4,6 +4,7 @@ from aiogram.fsm.storage.mongo import MongoStorage
 from config.settings import settings
 from db.mongodb import get_database
 from bot.handlers import common, projects, estimation
+from bot.middlewares.voice import VoiceTranscriptionMiddleware
 
 
 def create_bot() -> Bot:
@@ -14,6 +15,8 @@ def create_dispatcher() -> Dispatcher:
     db = get_database()
     storage = MongoStorage(db.client, db_name=settings.mongodb_db_name)
     dp = Dispatcher(storage=storage)
+
+    dp.message.middleware(VoiceTranscriptionMiddleware())
 
     dp.include_router(common.router)
     dp.include_router(projects.router)
