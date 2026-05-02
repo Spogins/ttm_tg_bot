@@ -1,3 +1,6 @@
+"""
+Application entry point — starts the bot in polling (dev) or webhook (prod) mode.
+"""
 import asyncio
 import os
 
@@ -24,6 +27,11 @@ BOT_COMMANDS = [
 
 
 async def run_polling():
+    """
+    Connect to databases, start aiogram long-polling, and clean up on exit.
+
+    :return: None
+    """
     await mongo_connect()
     await qdrant_connect()
 
@@ -35,12 +43,20 @@ async def run_polling():
     try:
         await dp.start_polling(bot)
     finally:
+        # always disconnect even if polling crashes
         await mongo_disconnect()
         await qdrant_disconnect()
         await bot.session.close()
 
 
 async def on_startup(bot, dp):
+    """
+    Initialize databases and register the Telegram webhook on app startup.
+
+    :param bot: The aiogram Bot instance.
+    :param dp: The aiogram Dispatcher instance.
+    :return: None
+    """
     await mongo_connect()
     await qdrant_connect()
     await bot.set_my_commands(BOT_COMMANDS)
@@ -49,28 +65,46 @@ async def on_startup(bot, dp):
 
 
 async def on_shutdown(bot, dp):
+    """
+    Disconnect databases and remove the Telegram webhook on app shutdown.
+
+    :param bot: The aiogram Bot instance.
+    :param dp: The aiogram Dispatcher instance.
+    :return: None
+    """
     await mongo_disconnect()
     await qdrant_disconnect()
     await bot.delete_webhook()
 
 
 def run_webhook():
+    """
+    Build the aiohttp app, attach the aiogram webhook handler, and run the server.
+
+    :return: None
+    """
     bot = create_bot()
     dp = create_dispatcher()
 
+    # lambda captures bot/dp so the callbacks receive the right instances
     dp.startup.register(lambda: on_startup(bot, dp))
     dp.shutdown.register(lambda: on_shutdown(bot, dp))
 
     app = web.Application()
     handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     handler.register(app, path=settings.webhook_path)
-    setup_application(app, dp, bot=bot)
+    setup_application(app, dp, bot=bot)  # wires aiogram startup/shutdown into aiohttp lifecycle
 
     logger.info("Starting in webhook mode")
     web.run_app(app, host=settings.webapp_host, port=settings.webapp_port)
 
 
 def main():
+    """
+    Configure logging and launch polling or webhook mode based on settings.
+
+    :return: None
+    """
     setup_logging(env=os.getenv("ENV", "development"))
 
     if settings.dev_mode:

@@ -1,13 +1,28 @@
+"""
+Inline keyboard builders for common bot interactions.
+"""
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
 def start_keyboard() -> InlineKeyboardMarkup:
+    """
+    Return a keyboard with a single 'Add project' button.
+
+    :return: InlineKeyboardMarkup with the add-project button.
+    """
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Добавить проект", callback_data="add_project")]
     ])
 
 
 def projects_keyboard(projects: list[dict], active_project_id: str | None = None) -> InlineKeyboardMarkup:
+    """
+    Build a per-project row keyboard with select, update, and delete buttons.
+
+    :param projects: List of project dicts with at least 'project_id' and 'name' keys.
+    :param active_project_id: ID of the currently active project to mark with a checkmark.
+    :return: InlineKeyboardMarkup with one row per project plus an add-project button.
+    """
     buttons = []
     for p in projects:
         is_active = p["project_id"] == active_project_id
@@ -22,6 +37,12 @@ def projects_keyboard(projects: list[dict], active_project_id: str | None = None
 
 
 def confirm_delete_keyboard(project_id: str) -> InlineKeyboardMarkup:
+    """
+    Return a yes/cancel keyboard for the delete-confirmation prompt.
+
+    :param project_id: UUID of the project to be deleted.
+    :return: InlineKeyboardMarkup with confirm and cancel buttons.
+    """
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete:{project_id}"),
@@ -31,6 +52,11 @@ def confirm_delete_keyboard(project_id: str) -> InlineKeyboardMarkup:
 
 
 def estimation_keyboard() -> InlineKeyboardMarkup:
+    """
+    Return a keyboard with save, adjust, and details actions for an estimation result.
+
+    :return: InlineKeyboardMarkup with save, adjust, and details buttons.
+    """
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Сохранить", callback_data="estimation:save"),

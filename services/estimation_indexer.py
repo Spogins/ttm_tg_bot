@@ -1,3 +1,6 @@
+"""
+Index and search per-user estimation vectors in Qdrant using OpenAI embeddings.
+"""
 from openai import AsyncOpenAI
 from qdrant_client.models import PointStruct, Distance
 from loguru import logger
@@ -13,10 +16,22 @@ _openai = AsyncOpenAI(api_key=settings.openai_api_key)
 
 
 def _collection(user_id: int) -> str:
+    """
+    Return the Qdrant collection name for a user's estimations.
+
+    :param user_id: Telegram user ID.
+    :return: Collection name string.
+    """
     return f"{COLLECTION_PREFIX}_{user_id}"
 
 
 async def _embed(text: str) -> list[float]:
+    """
+    Return a single embedding vector for the given text.
+
+    :param text: Text string to embed.
+    :return: Embedding vector as a list of floats.
+    """
     response = await _openai.embeddings.create(
         model=settings.embedding_model,
         input=[text],
@@ -25,6 +40,12 @@ async def _embed(text: str) -> list[float]:
 
 
 def _estimation_text(estimation: Estimation) -> str:
+    """
+    Serialize an estimation to a plain-text string suitable for embedding.
+
+    :param estimation: Estimation model instance.
+    :return: Multi-line text representation of the estimation.
+    """
     return (
         f"Task: {estimation.task}\n"
         f"Tech: {', '.join(estimation.tech_stack)}\n"
@@ -34,6 +55,12 @@ def _estimation_text(estimation: Estimation) -> str:
 
 
 async def index_estimation(estimation: Estimation) -> None:
+    """
+    Embed and upsert one estimation into the user's Qdrant collection.
+
+    :param estimation: Estimation model instance to index.
+    :return: None
+    """
     collection = _collection(estimation.user_id)
     await ensure_collection(collection, vector_size=EMBEDDING_DIM, distance=Distance.COSINE)
 
@@ -41,6 +68,7 @@ async def index_estimation(estimation: Estimation) -> None:
     vector = await _embed(text)
 
     point = PointStruct(
+        # derive a stable int64 ID from the UUID string: abs() prevents negative hash; modulo fits int64 range
         id=abs(hash(estimation.estimation_id)) % (2 ** 63),
         vector=vector,
         payload={
@@ -59,6 +87,14 @@ async def index_estimation(estimation: Estimation) -> None:
 
 
 async def search_similar(user_id: int, query: str, limit: int = 5) -> list[dict]:
+    """
+    Find past estimations semantically similar to the query; returns empty list on error.
+
+    :param user_id: Telegram user ID whose collection to search.
+    :param query: Natural-language search query.
+    :param limit: Maximum number of results to return.
+    :return: List of estimation payload dicts, or empty list if the collection is missing.
+    """
     collection = _collection(user_id)
     client = get_client()
 

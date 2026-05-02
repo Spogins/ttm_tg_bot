@@ -1,3 +1,6 @@
+"""
+MongoDB client and CRUD helpers.
+"""
 from .client import connect, disconnect, get_database
 from . import users, projects, estimations
 

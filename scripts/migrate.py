@@ -9,17 +9,22 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))  # make project root importable without pip install
 
 from db.mongodb.client import connect, get_database
 
 
 async def run_migrations():
+    """
+    Discover and apply all migration files not yet recorded in _migrations.
+
+    :return: None
+    """
     await connect()
     db = get_database()
     applied = {
         doc["name"]
-        async for doc in db["_migrations"].find({}, {"name": 1})
+        async for doc in db["_migrations"].find({}, {"name": 1})  # projection fetches only 'name', avoids full docs
     }
 
     migration_files = sorted(Path("migrations").glob("*.py"))
@@ -30,6 +35,7 @@ async def run_migrations():
         return
 
     for path in pending:
+        # dynamically import the migration module by file path without adding it to sys.modules permanently
         spec = importlib.util.spec_from_file_location(path.stem, path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -44,6 +50,12 @@ async def run_migrations():
 
 
 def create_migration(name: str):
+    """
+    Scaffold a new numbered migration file in the migrations/ directory.
+
+    :param name: Short snake_case name used for the migration filename and description.
+    :return: None
+    """
     Path("migrations").mkdir(exist_ok=True)
     existing = sorted(Path("migrations").glob("*.py"))
     next_num = len(existing) + 1

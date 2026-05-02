@@ -1,3 +1,6 @@
+"""
+Middlewares for user hydration and per-user LLM token-limit enforcement.
+"""
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
@@ -9,7 +12,7 @@ from config.settings import settings
 from db.mongodb import users as users_db
 from bot.states.states import EstimationStates
 
-# Состояния, в которых происходит LLM-запрос
+# states that trigger an LLM call; token usage is only checked for these
 LLM_STATES = {
     EstimationStates.awaiting_task,
     EstimationStates.clarifying,
@@ -17,7 +20,10 @@ LLM_STATES = {
 
 
 class UserMiddleware(BaseMiddleware):
-    """Загружает или создаёт пользователя и кладёт в data['user']."""
+    """
+    Load or create the User document from MongoDB and inject it into data['user'].
+    Messages without a sender (e.g. channel posts) are passed through unchanged.
+    """
 
     async def __call__(
         self,
@@ -38,7 +44,10 @@ class UserMiddleware(BaseMiddleware):
 
 
 class TokenLimitMiddleware(BaseMiddleware):
-    """Блокирует LLM-запросы при превышении лимита токенов."""
+    """
+    Block LLM requests and notify the user when their daily or monthly token limit is exceeded.
+    Only active for states listed in LLM_STATES; all other states are passed through.
+    """
 
     async def __call__(
         self,
@@ -51,6 +60,7 @@ class TokenLimitMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         current_state = await fsm_context.get_state()
+        # aiogram stores state as a string ("Group:state"); compare against .state attribute, not State objects
         if current_state not in {s.state for s in LLM_STATES}:
             return await handler(event, data)
 

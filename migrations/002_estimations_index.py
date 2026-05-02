@@ -1,9 +1,9 @@
-description = "init_users"
+description = "estimations_index"
 
 
 async def up(db):
     """
-    Create initial users collection indexes.
+    Add indexes for the estimations collection.
 
     :param db: AsyncIOMotorDatabase instance.
     :return: None
