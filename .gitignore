@@ -60,6 +60,9 @@ docker-compose.override.yml
 .DS_Store
 Thumbs.db
 
+# ─── Plans ───────────────────────────────────────────────────
+plan/
+
 # ─── Temp / test files ───────────────────────────────────────
 test.py
 test.txt
