@@ -29,6 +29,20 @@ class User(BaseModel):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class Estimation(BaseModel):
+    estimation_id: str
+    user_id: int
+    project_id: Optional[str] = None
+    project_name: str = ""
+    task: str
+    total_hours: float
+    complexity: int  # 1–5
+    tech_stack: list[str] = Field(default_factory=list)
+    breakdown: dict = Field(default_factory=dict)
+    actual_hours: Optional[float] = None
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class Project(BaseModel):
     project_id: str
     user_id: int
