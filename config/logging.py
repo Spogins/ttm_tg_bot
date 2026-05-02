@@ -1,7 +1,9 @@
+# -*- coding: utf-8 -*-
 """
 Logging configuration using loguru.
 """
 import sys
+
 from loguru import logger
 
 
@@ -26,7 +28,7 @@ def setup_logging(env: str = "development") -> None:
             encoding="utf-8",
         )
         logger.add(
-            "logs/error.log",
+            "logs/error.log",  # separate file for faster incident triage
             format=fmt,
             rotation="10 MB",
             retention="7 days",

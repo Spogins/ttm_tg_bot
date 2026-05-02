@@ -1,14 +1,15 @@
+# -*- coding: utf-8 -*-
 """
 Bot and dispatcher factory functions.
 """
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.mongo import MongoStorage
 
+from bot.handlers import common, estimation, projects
+from bot.middlewares.token_limit import TokenLimitMiddleware, UserMiddleware
+from bot.middlewares.voice import VoiceTranscriptionMiddleware
 from config.settings import settings
 from db.mongodb import get_database
-from bot.handlers import common, projects, estimation
-from bot.middlewares.voice import VoiceTranscriptionMiddleware
-from bot.middlewares.token_limit import UserMiddleware, TokenLimitMiddleware
 
 
 def create_bot() -> Bot:
@@ -31,9 +32,10 @@ def create_dispatcher() -> Dispatcher:
     storage = MongoStorage(db.client, db_name=settings.mongodb_db_name)
     dp = Dispatcher(storage=storage)
 
+    # order matters: user hydration → token check → transcription
     dp.message.middleware(UserMiddleware())
     dp.message.middleware(TokenLimitMiddleware())
-    dp.message.middleware(VoiceTranscriptionMiddleware())
+    dp.message.middleware(VoiceTranscriptionMiddleware())  # runs last, after token gate
 
     dp.include_router(common.router)
     dp.include_router(projects.router)

@@ -1,18 +1,19 @@
+# -*- coding: utf-8 -*-
 """
-Index and search per-user estimation vectors in Qdrant using OpenAI embeddings.
+Index and search per-user estimation vectors in Qdrant using Voyage AI embeddings.
 """
-from openai import AsyncOpenAI
-from qdrant_client.models import PointStruct, Distance
+import voyageai
 from loguru import logger
+from qdrant_client.models import Distance, PointStruct
 
 from config.settings import settings
 from db.mongodb.models import Estimation
 from db.qdrant.client import ensure_collection, get_client
 
-EMBEDDING_DIM = 1536
+EMBEDDING_DIM = 1024  # voyage-code-3
 COLLECTION_PREFIX = "estimations"
 
-_openai = AsyncOpenAI(api_key=settings.openai_api_key)
+_voyage = voyageai.AsyncClient(api_key=settings.voyage_api_key)
 
 
 def _collection(user_id: int) -> str:
@@ -32,11 +33,8 @@ async def _embed(text: str) -> list[float]:
     :param text: Text string to embed.
     :return: Embedding vector as a list of floats.
     """
-    response = await _openai.embeddings.create(
-        model=settings.embedding_model,
-        input=[text],
-    )
-    return response.data[0].embedding
+    result = await _voyage.embed([text], model=settings.embedding_model)  # API expects a list
+    return result.embeddings[0]  # single text → first element
 
 
 def _estimation_text(estimation: Estimation) -> str:
@@ -68,8 +66,8 @@ async def index_estimation(estimation: Estimation) -> None:
     vector = await _embed(text)
 
     point = PointStruct(
-        # derive a stable int64 ID from the UUID string: abs() prevents negative hash; modulo fits int64 range
-        id=abs(hash(estimation.estimation_id)) % (2 ** 63),
+        # derive a stable int64 ID from the UUID string; abs() prevents negatives, modulo fits int64 range
+        id=abs(hash(estimation.estimation_id)) % (2**63),
         vector=vector,
         payload={
             "task": estimation.task,
@@ -105,7 +103,7 @@ async def search_similar(user_id: int, query: str, limit: int = 5) -> list[dict]
             query_vector=vector,
             limit=limit,
         )
-        return [r.payload for r in results]
+        return [r.payload for r in results]  # strip Qdrant wrapper
     except Exception as e:
         logger.warning(f"Estimation search failed for user {user_id}: {e}")
-        return []
+        return []  # collection absent for new users
