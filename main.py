@@ -1,19 +1,22 @@
+# -*- coding: utf-8 -*-
 """
 Application entry point — starts the bot in polling (dev) or webhook (prod) mode.
 """
 import asyncio
 import os
 
-from aiohttp import web
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram.types import BotCommand
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 from loguru import logger
 
+from bot.setup import create_bot, create_dispatcher
 from config.logging import setup_logging
 from config.settings import settings
-from db.mongodb import connect as mongo_connect, disconnect as mongo_disconnect
-from db.qdrant import connect as qdrant_connect, disconnect as qdrant_disconnect
-from bot.setup import create_bot, create_dispatcher
+from db.mongodb import connect as mongo_connect
+from db.mongodb import disconnect as mongo_disconnect
+from db.qdrant import connect as qdrant_connect
+from db.qdrant import disconnect as qdrant_disconnect
 
 BOT_COMMANDS = [
     BotCommand(command="start", description="Начать работу"),
