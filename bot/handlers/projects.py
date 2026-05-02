@@ -54,6 +54,67 @@ async def cb_select_project(callback: CallbackQuery):
     await callback.answer(f"Активный проект: {project.name}")
 
 
+@router.callback_query(F.data.startswith("update_project:"))
+async def cb_update_project(callback: CallbackQuery, state: FSMContext):
+    project_id = callback.data.split(":", 1)[1]
+    project = await projects_db.get_project(project_id)
+    if not project:
+        await callback.answer("Проект не найден.", show_alert=True)
+        return
+    await state.set_state(ProjectStates.awaiting_update_file)
+    await state.update_data(update_project_id=project_id)
+    await callback.message.answer(
+        f"Отправьте новый файл структуры для проекта «{project.name}».\n"
+        "Индекс в Qdrant будет пересоздан."
+    )
+    await callback.answer()
+
+
+@router.message(ProjectStates.awaiting_update_file)
+async def handle_update_file(message: Message, state: FSMContext):
+    from services.project_parser import parse
+    from services.indexer import index_project, delete_project_index
+
+    data = await state.get_data()
+    project_id = data.get("update_project_id")
+    await state.clear()
+
+    if not project_id:
+        await message.answer("Ошибка: проект не найден. Начните заново.")
+        return
+
+    content = b""
+    if message.document:
+        file = await message.bot.get_file(message.document.file_id)
+        import io
+        buf = io.BytesIO()
+        await message.bot.download_file(file.file_path, destination=buf)
+        content = buf.getvalue()
+    elif message.text:
+        content = message.text
+    else:
+        await message.answer("Отправьте файл или текстовое описание.")
+        return
+
+    msg = await message.answer("Пересоздаю индекс...")
+    parsed = parse(content)
+
+    await delete_project_index(project_id)
+    count = await index_project(project_id, parsed)
+    await projects_db.update_project(
+        project_id,
+        tech_stack=parsed.tech_stack,
+        structure_raw=parsed.raw,
+        files_indexed=count,
+    )
+
+    await msg.edit_text(
+        f"Структура обновлена.\n"
+        f"Файлов в индексе: {count}\n"
+        f"Технологии: {', '.join(parsed.tech_stack) or '—'}"
+    )
+
+
 @router.callback_query(F.data.startswith("delete_project:"))
 async def cb_delete_project(callback: CallbackQuery):
     project_id = callback.data.split(":", 1)[1]

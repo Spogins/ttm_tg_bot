@@ -4,6 +4,7 @@ from aiogram.fsm.state import State, StatesGroup
 class ProjectStates(StatesGroup):
     awaiting_file = State()
     awaiting_name = State()
+    awaiting_update_file = State()
 
 
 class EstimationStates(StatesGroup):

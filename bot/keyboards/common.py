@@ -14,6 +14,7 @@ def projects_keyboard(projects: list[dict], active_project_id: str | None = None
         label = f"{'✅' if is_active else '●'} {p['name']}"
         buttons.append([
             InlineKeyboardButton(text=label, callback_data=f"select_project:{p['project_id']}"),
+            InlineKeyboardButton(text="🔄", callback_data=f"update_project:{p['project_id']}"),
             InlineKeyboardButton(text="🗑", callback_data=f"delete_project:{p['project_id']}"),
         ])
     buttons.append([InlineKeyboardButton(text="➕ Добавить проект", callback_data="add_project")])
