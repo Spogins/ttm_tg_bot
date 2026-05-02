@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Application settings loaded from environment variables / .env file.
 """
@@ -9,6 +10,7 @@ class Settings(BaseSettings):
     """
     Central config: Telegram, Anthropic, AssemblyAI, MongoDB, Qdrant, and token limits.
     """
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -34,9 +36,9 @@ class Settings(BaseSettings):
     qdrant_port: int = Field(6333)
     qdrant_api_key: str = Field("")
 
-    # openai embeddings
-    openai_api_key: str = Field(..., description="OpenAI API key for embeddings")
-    embedding_model: str = Field("text-embedding-3-small")
+    # voyage ai embeddings
+    voyage_api_key: str = Field(..., description="Voyage AI API key for embeddings")
+    embedding_model: str = Field("voyage-code-3")
 
     # webhook (ignored in dev_mode)
     webhook_url: str = Field(..., description="Public URL for Telegram webhook (e.g. https://yourdomain.com)")

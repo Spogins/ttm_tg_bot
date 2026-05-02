@@ -1,26 +1,26 @@
 # Telegram bot
 aiogram==3.27.0
+aiohttp~=3.10.11
 
 # LLM
 anthropic==0.97.0
 
 # Audio transcription
 assemblyai==0.63.0
-
-# Database
-motor==3.7.1
-qdrant-client==1.17.1
-
-# Embeddings
-openai==2.32.0
-
-# Config
-pydantic-settings==2.14.0
-python-dotenv==1.2.2
+langchain-text-splitters~=1.1.2
 
 # Logging
 loguru==0.7.3
 
+# Database
+motor==3.7.1
+
 pydantic~=2.9.2
-aiohttp~=3.10.11
-langchain-text-splitters~=1.1.2
+
+# Config
+pydantic-settings==2.14.0
+python-dotenv==1.2.2
+qdrant-client==1.17.1
+
+# Embeddings
+voyageai

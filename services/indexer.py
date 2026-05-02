@@ -1,13 +1,13 @@
+# -*- coding: utf-8 -*-
 """
-Index and search project structure vectors in Qdrant using OpenAI embeddings.
+Index and search project structure vectors in Qdrant using Voyage AI embeddings.
 """
-import asyncio
 from typing import Literal
 
+import voyageai
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from openai import AsyncOpenAI
-from qdrant_client.models import PointStruct, Distance
 from loguru import logger
+from qdrant_client.models import Distance, PointStruct
 
 from config.settings import settings
 from db.mongodb import projects as projects_db
@@ -16,26 +16,23 @@ from services.project_parser import ParsedProject
 
 ChunkType = Literal["structure", "module", "tech"]
 
-EMBEDDING_DIM = 1536  # text-embedding-3-small
+EMBEDDING_DIM = 1024  # voyage-code-3
 COLLECTION_PREFIX = "project"
 
-_openai = AsyncOpenAI(api_key=settings.openai_api_key)
+_voyage = voyageai.AsyncClient(api_key=settings.voyage_api_key)
 # 50-token overlap preserves context across chunk boundaries
 _splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
 
 
 async def _embed(texts: list[str]) -> list[list[float]]:
     """
-    Return embeddings for a batch of texts using the configured OpenAI model.
+    Return embeddings for a batch of texts using the configured Voyage AI model.
 
     :param texts: List of text strings to embed.
     :return: List of embedding vectors, one per input text.
     """
-    response = await _openai.embeddings.create(
-        model=settings.embedding_model,
-        input=texts,
-    )
-    return [item.embedding for item in response.data]
+    result = await _voyage.embed(texts, model=settings.embedding_model)
+    return result.embeddings
 
 
 def _build_chunks(parsed: ParsedProject) -> list[tuple[str, ChunkType]]:
@@ -54,7 +51,9 @@ def _build_chunks(parsed: ParsedProject) -> list[tuple[str, ChunkType]]:
     # module chunks
     for module in parsed.modules:
         module_files = [f for f in parsed.files if f.startswith(module + "/")]
-        text = f"Module: {module}\nFiles:\n" + "\n".join(module_files[:50])  # cap at 50 files to keep chunk size reasonable
+        text = f"Module: {module}\nFiles:\n" + "\n".join(  # noqa: E231
+            module_files[:50]
+        )  # cap at 50 files to keep chunk size reasonable
         chunks.append((text, "module"))
 
     # structure chunks (remaining files split by RecursiveCharacterTextSplitter)
