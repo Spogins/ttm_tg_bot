@@ -1,7 +1,8 @@
+# -*- coding: utf-8 -*-
 """
 MongoDB client and CRUD helpers.
 """
+from . import estimations, history, projects, users
 from .client import connect, disconnect, get_database
-from . import users, projects, estimations
 
-__all__ = ["connect", "disconnect", "get_database", "users", "projects", "estimations"]
+__all__ = ["connect", "disconnect", "get_database", "users", "projects", "estimations", "history"]

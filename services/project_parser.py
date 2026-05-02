@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Parse project structure files (JSON tree, TXT tree, or free-text description) into a ParsedProject.
 """
@@ -40,6 +41,7 @@ class ParsedProject:
     """
     Normalized output of any parse path: file list, tech stack, modules, and raw input.
     """
+
     files: list[str] = field(default_factory=list)
     tech_stack: list[str] = field(default_factory=list)
     modules: list[str] = field(default_factory=list)
@@ -125,9 +127,20 @@ def parse_json(data: dict | list) -> ParsedProject:
     """
     Parse a JSON file-tree dict or list into a ParsedProject.
 
+    Supports the structured format ``{"tech_stack": [...], "files": [...]}``
+    produced by ``make structure``, as well as legacy nested dicts and flat lists.
+
     :param data: Parsed JSON object representing the project file tree.
     :return: ParsedProject with detected files, tech stack, and modules.
     """
+    # structured format: {"tech_stack": [...], "files": [...]}
+    if isinstance(data, dict) and "files" in data:
+        files = [str(f) for f in data["files"]]
+        # use explicit tech_stack if provided; fall back to filename detection
+        tech = list(data["tech_stack"]) if data.get("tech_stack") else _detect_tech(files)
+        modules = _detect_modules(files)
+        return ParsedProject(files=files, tech_stack=tech, modules=modules, raw=data)
+
     files: list[str] = []
     _collect_paths(data, "", files)
     tech = _detect_tech(files)
@@ -157,8 +170,17 @@ def parse_text_description(text: str) -> ParsedProject:
     :return: ParsedProject with detected tech stack; files and modules are empty.
     """
     known_tech = list(TECH_MARKERS.values()) + [
-        "FastAPI", "Flask", "Django", "React", "Vue", "Angular",
-        "PostgreSQL", "MongoDB", "Redis", "Kafka", "RabbitMQ",
+        "FastAPI",
+        "Flask",
+        "Django",
+        "React",
+        "Vue",
+        "Angular",
+        "PostgreSQL",
+        "MongoDB",
+        "Redis",
+        "Kafka",
+        "RabbitMQ",
     ]
     # word boundaries (\b) prevent partial matches, e.g. "Go" matching inside "MongoDB"
     found = [t for t in known_tech if re.search(rf"\b{re.escape(t)}\b", text, re.IGNORECASE)]

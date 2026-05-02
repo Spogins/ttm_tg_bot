@@ -74,9 +74,15 @@ def _parse_result(text: str) -> EstimationResult | None:
     :param text: Raw model output that may include markdown fences.
     :return: Parsed EstimationResult, or None if parsing fails.
     """
-    # model sometimes wraps the JSON in ```json ... ``` fences
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    raw = match.group(1) if match else text.strip()
+    raw = text.strip()
+    # strip markdown fences if present
+    fenced = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", raw)
+    if fenced:
+        raw = fenced.group(1).strip()
+    # extract outermost JSON object; rfind('}') avoids stopping at first nested '}'
+    start, end = raw.find("{"), raw.rfind("}")
+    if start != -1 and end > start:
+        raw = raw[start : end + 1]
     try:
         data = json.loads(raw)
         return EstimationResult(
