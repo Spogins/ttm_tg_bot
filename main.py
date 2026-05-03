@@ -1,0 +1,125 @@
+# -*- coding: utf-8 -*-
+"""
+Application entry point — starts the bot in polling (dev) or webhook (prod) mode.
+"""
+import asyncio
+import os
+
+from aiogram.types import BotCommand
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
+from loguru import logger
+
+from bot.setup import create_bot, create_dispatcher
+from config.logging import setup_logging
+from config.settings import settings
+from db.mongodb import connect as mongo_connect
+from db.mongodb import disconnect as mongo_disconnect
+from db.qdrant import connect as qdrant_connect
+from db.qdrant import disconnect as qdrant_disconnect
+from services.reminder_scheduler import reminder_scheduler
+
+BOT_COMMANDS = [
+    BotCommand(command="start", description="Начать работу"),
+    BotCommand(command="estimate", description="Оценить задачу"),
+    BotCommand(command="sprint", description="Спланировать спринт"),
+    BotCommand(command="projects", description="Управление проектами"),
+    BotCommand(command="history", description="История оценок"),
+    BotCommand(command="stats", description="Статистика точности"),
+    BotCommand(command="instructions", description="Как пользоваться ботом"),
+    BotCommand(command="help", description="Список команд"),
+    BotCommand(command="cancel", description="Отменить текущее действие"),
+]
+
+
+async def run_polling():
+    """
+    Connect to databases, start aiogram long-polling, and clean up on exit.
+
+    :return: None
+    """
+    await mongo_connect()
+    await qdrant_connect()
+
+    bot = create_bot()
+    asyncio.create_task(reminder_scheduler(bot))
+    dp = create_dispatcher()
+
+    await bot.set_my_commands(BOT_COMMANDS)
+    logger.info("Starting in polling mode")
+    try:
+        await dp.start_polling(bot)
+    finally:
+        # always disconnect even if polling crashes
+        await mongo_disconnect()
+        await qdrant_disconnect()
+        await bot.session.close()
+
+
+async def on_startup(bot, dp):
+    """
+    Initialize databases and register the Telegram webhook on app startup.
+
+    :param bot: The aiogram Bot instance.
+    :param dp: The aiogram Dispatcher instance.
+    :return: None
+    """
+    await mongo_connect()
+    await qdrant_connect()
+    asyncio.create_task(reminder_scheduler(bot))
+    await bot.set_my_commands(BOT_COMMANDS)
+    await bot.set_webhook(f"{settings.webhook_url}{settings.webhook_path}")
+    logger.info(f"Webhook set: {settings.webhook_url}{settings.webhook_path}")
+
+
+async def on_shutdown(bot, dp):
+    """
+    Disconnect databases and remove the Telegram webhook on app shutdown.
+
+    :param bot: The aiogram Bot instance.
+    :param dp: The aiogram Dispatcher instance.
+    :return: None
+    """
+    await mongo_disconnect()
+    await qdrant_disconnect()
+    await bot.delete_webhook()
+
+
+def run_webhook():
+    """
+    Build the aiohttp app, attach the aiogram webhook handler, and run the server.
+
+    :return: None
+    """
+    bot = create_bot()
+    dp = create_dispatcher()
+
+    # lambda captures bot/dp so the callbacks receive the right instances
+    dp.startup.register(lambda: on_startup(bot, dp))
+    dp.shutdown.register(lambda: on_shutdown(bot, dp))
+
+    app = web.Application()
+    handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+    handler.register(app, path=settings.webhook_path)
+    setup_application(app, dp, bot=bot)  # wires aiogram startup/shutdown into aiohttp lifecycle
+
+    logger.info("Starting in webhook mode")
+    web.run_app(app, host=settings.webapp_host, port=settings.webapp_port)
+
+
+def main():
+    """
+    Configure logging and launch polling or webhook mode based on settings.
+
+    :return: None
+    """
+    setup_logging(env=os.getenv("ENV", "development"))
+
+    if settings.dev_mode:
+        asyncio.run(run_polling())
+    else:
+        run_webhook()
+
+
+if __name__ == "__main__":
+    main()

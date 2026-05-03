@@ -1,0 +1,168 @@
+# -*- coding: utf-8 -*-
+"""
+estimation_node: main Claude call that produces a structured EstimationResult.
+"""
+import json
+import re
+
+from loguru import logger
+
+from agent.graph.state import AgentState, EstimationResult
+from agent.llm import get_client
+from config.settings import settings
+from db.mongodb import users as users_db
+
+_SYSTEM = """\
+You are an experienced Python backend tech lead.
+Estimate the development task in detail, then return a JSON object and nothing else.
+
+Required JSON schema:
+{
+  "subtasks": [{"name": "<string>", "hours": <float>}],
+  "total_hours": <float>,
+  "complexity": <integer 1-5>,
+  "confidence": "high" | "medium" | "low"
+}
+
+Rules:
+- subtasks must be exhaustive and cover the full scope
+- total_hours must equal the sum of subtask hours
+- complexity 1=trivial, 5=very hard
+- confidence reflects how clear the requirements are\
+"""
+
+
+def _build_user_prompt(state: AgentState, experience_level: str) -> str:
+    """
+    Compose the full user-side prompt from project context, history, and task text.
+
+    Template chunks (payload text starting with "Template:") are separated from regular
+    project context and injected as a dedicated few-shot section so the model can calibrate
+    its estimate against real historical deviation data.
+
+    :param state: Current agent state.
+    :param experience_level: Developer experience level from user settings (junior/mid/senior).
+    :return: Assembled prompt string.
+    """
+    lines: list[str] = []
+
+    if state.get("project_context"):
+        all_chunks: list[str] = state["project_context"]
+        template_chunks = [c for c in all_chunks if c.startswith("Template:")]
+        context_chunks = [c for c in all_chunks if not c.startswith("Template:")]
+
+        if context_chunks:
+            ctx = "\n".join(context_chunks)
+            lines.append(f"## Project context\n{ctx}")
+
+        if template_chunks:
+            lines.append(
+                "## Project templates (completed tasks with real hours)\n"
+                "Use these as calibration data — note the deviation column:\n" + "\n".join(template_chunks)
+            )
+
+    if state.get("similar_tasks"):
+        parts = []
+        for t in state["similar_tasks"]:
+            parts.append(
+                f"- {t.get('task', '')} → {t.get('total_hours', '?')}h " f"(complexity {t.get('complexity', '?')})"
+            )
+        lines.append("## Similar past tasks\n" + "\n".join(parts))
+
+    if state.get("conversation_history"):
+        history_lines = []
+        for msg in state["conversation_history"][-5:]:  # last 5 messages only
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            history_lines.append(f"{role}: {content}")
+        lines.append("## Conversation history\n" + "\n".join(history_lines))
+
+    if state.get("scope"):
+        _SCOPE_LABELS = {
+            "backend": "Backend",
+            "frontend": "Frontend",
+            "fullstack": "Backend + Frontend",
+            "qa": "QA/Testing",
+            "devops": "DevOps/Infrastructure",
+        }
+        scope_str = ", ".join(_SCOPE_LABELS.get(s, s) for s in state["scope"])
+        lines.append(
+            f"## Scope\n"
+            f"Estimate ONLY the following areas: {scope_str}. "
+            f"Do not include subtasks outside this scope."
+        )
+
+    lines.append(f"## Developer experience level\n{experience_level}")
+    lines.append(f"## Task to estimate\n{state['user_input']}")
+    return "\n\n".join(lines)
+
+
+def _parse_result(text: str) -> EstimationResult | None:
+    """
+    Extract and parse the JSON block from the model response.
+
+    :param text: Raw model output that may include markdown fences.
+    :return: Parsed EstimationResult, or None if parsing fails.
+    """
+    raw = text.strip()
+    # strip markdown fences if present
+    fenced = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", raw)
+    if fenced:
+        raw = fenced.group(1).strip()
+    # extract outermost JSON object; rfind('}') avoids stopping at first nested '}'
+    start, end = raw.find("{"), raw.rfind("}")
+    if start != -1 and end > start:
+        raw = raw[start : end + 1]
+    try:
+        data = json.loads(raw)
+        return EstimationResult(
+            subtasks=data["subtasks"],
+            total_hours=float(data["total_hours"]),
+            complexity=int(data["complexity"]),
+            confidence=data["confidence"],
+        )
+    except Exception as e:
+        logger.error(f"estimation_node parse error: {e}")
+        return None  # caller retries on None
+
+
+async def estimation_node(state: AgentState) -> dict:
+    """
+    Call Claude Sonnet to estimate the task; retries once on parse failure.
+
+    :param state: Current agent state.
+    :return: Updated state dict with estimation and tokens_used.
+    """
+    user = await users_db.get_user(state["user_id"])
+    experience_level = user.settings.experience_level if user else "mid"  # default if user missing
+
+    client = get_client()
+    prompt = _build_user_prompt(state, experience_level)
+    total_tokens = 0
+    estimation: EstimationResult | None = None
+
+    for attempt in range(2):  # retry once on parse failure
+        try:
+            response = await client.messages.create(
+                model=settings.claude_model,
+                max_tokens=1024,
+                system=_SYSTEM,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            tokens = response.usage.input_tokens + response.usage.output_tokens
+            total_tokens += tokens
+            estimation = _parse_result(response.content[0].text)
+            if estimation is not None:  # stop on first valid parse
+                break
+            logger.warning(f"estimation_node: parse failed on attempt {attempt + 1}, retrying")
+        except Exception as e:
+            logger.error(f"estimation_node error (attempt {attempt + 1}): {e}")
+            break  # don't retry on API error
+
+    await users_db.increment_tokens(state["user_id"], total_tokens)  # persist token spend
+    logger.info(
+        f"estimation_node: user={state['user_id']} "
+        f"hours={estimation['total_hours'] if estimation else 'N/A'} "
+        f"tokens={total_tokens}"
+    )
+    return {"estimation": estimation, "tokens_used": total_tokens}
