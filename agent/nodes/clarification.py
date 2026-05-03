@@ -12,6 +12,9 @@ from db.mongodb import users as users_db
 
 _SYSTEM = (
     "You are a senior software engineer helping to clarify a vague task description. "
+    "If project context is provided, use it: reference specific modules, files, or technologies "
+    "that actually exist in the project instead of asking generic questions. "
+    "If similar past tasks are provided, reference them to clarify scope. "
     "Generate 2-3 short, specific clarifying questions in the same language as the user's message. "
     "Format: one question per line, no numbering, no intro text."
 )
@@ -60,6 +63,28 @@ def _needs_clarification(text: str) -> bool:
     return not any(hint in lower for hint in tech_hints)  # no tech keyword found
 
 
+def _build_prompt(state: AgentState) -> str:
+    """
+    Compose the clarification prompt from project context, similar tasks, and user input.
+
+    :param state: Current agent state.
+    :return: Assembled prompt string for the Haiku call.
+    """
+    parts: list[str] = []
+
+    if state.get("project_context"):
+        # top 3 chunks are the most relevant to the query
+        ctx = "\n".join(state["project_context"][:3])
+        parts.append(f"## Project context\n{ctx}")
+
+    if state.get("similar_tasks"):
+        lines = [f"- {t.get('task', '')[:80]} → {t.get('total_hours', '?')}h" for t in state["similar_tasks"][:2]]
+        parts.append("## Similar past tasks\n" + "\n".join(lines))
+
+    parts.append(f"## Task to clarify\n{state['user_input']}")
+    return "\n\n".join(parts)
+
+
 async def clarification_node(state: AgentState) -> dict:
     """
     Set clarification_needed=True and generate questions if the task is vague.
@@ -78,7 +103,7 @@ async def clarification_node(state: AgentState) -> dict:
             model=HAIKU_MODEL,
             max_tokens=200,
             system=_SYSTEM,
-            messages=[{"role": "user", "content": state["user_input"]}],
+            messages=[{"role": "user", "content": _build_prompt(state)}],
         )
         question = response.content[0].text.strip()
         tokens = response.usage.input_tokens + response.usage.output_tokens

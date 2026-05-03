@@ -14,7 +14,7 @@ from db.mongodb import projects as projects_db
 from db.qdrant.client import ensure_collection, get_client
 from services.project_parser import ParsedProject
 
-ChunkType = Literal["structure", "module", "tech"]
+ChunkType = Literal["description", "structure", "module", "tech"]
 
 EMBEDDING_DIM = 1024  # voyage-code-3
 COLLECTION_PREFIX = "project"
@@ -35,14 +35,19 @@ async def _embed(texts: list[str]) -> list[list[float]]:
     return result.embeddings
 
 
-def _build_chunks(parsed: ParsedProject) -> list[tuple[str, ChunkType]]:
+def _build_chunks(parsed: ParsedProject, description: str = "") -> list[tuple[str, ChunkType]]:
     """
-    Split a ParsedProject into (text, type) chunks: one tech chunk, per-module chunks, and structure chunks.
+    Split a ParsedProject into (text, type) chunks: description, tech, module, and structure chunks.
 
     :param parsed: ParsedProject containing files, tech stack, and modules.
+    :param description: Optional free-text project description provided by the user.
     :return: List of (text, chunk_type) tuples ready for embedding.
     """
     chunks: list[tuple[str, ChunkType]] = []
+
+    # description chunk first — highest priority context for estimation
+    if description:
+        chunks.append((f"Project description: {description}", "description"))
 
     # tech chunk
     if parsed.tech_stack:
@@ -64,18 +69,19 @@ def _build_chunks(parsed: ParsedProject) -> list[tuple[str, ChunkType]]:
     return chunks
 
 
-async def index_project(project_id: str, parsed: ParsedProject) -> int:
+async def index_project(project_id: str, parsed: ParsedProject, description: str = "") -> int:
     """
     Embed and upsert all project chunks into Qdrant; return the number of points stored.
 
     :param project_id: Project UUID used to derive the collection name.
     :param parsed: ParsedProject with the structure to index.
+    :param description: Optional free-text project description to index as a dedicated chunk.
     :return: Number of vector points upserted into Qdrant.
     """
     collection = f"{COLLECTION_PREFIX}_{project_id}_docs"
     await ensure_collection(collection, vector_size=EMBEDDING_DIM, distance=Distance.COSINE)
 
-    chunks = _build_chunks(parsed)
+    chunks = _build_chunks(parsed, description)
     if not chunks:
         logger.warning(f"No chunks for project {project_id}")
         return 0

@@ -1,14 +1,16 @@
+# -*- coding: utf-8 -*-
 """
 Handlers for project management: listing, creating, updating, and deleting projects.
 """
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
-from bot.keyboards.common import projects_keyboard, start_keyboard, confirm_delete_keyboard
+from bot.keyboards.common import confirm_delete_keyboard, projects_keyboard, start_keyboard
 from bot.states.states import ProjectStates
-from db.mongodb import users as users_db, projects as projects_db
+from db.mongodb import projects as projects_db
+from db.mongodb import users as users_db
 
 router = Router()
 
@@ -34,7 +36,7 @@ async def cmd_projects(message: Message, user=None):
 
     active_id = user.active_project_id if user else None
     await message.answer(
-        f"Ваши проекты ({len(project_list)}):",
+        f"Ваши проекты ({len(project_list)}): ",
         reply_markup=projects_keyboard(
             [p.model_dump() for p in project_list],
             active_project_id=active_id,
@@ -88,8 +90,7 @@ async def cb_update_project(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProjectStates.awaiting_update_file)
     await state.update_data(update_project_id=project_id)
     await callback.message.answer(
-        f"Отправьте новый файл структуры для проекта «{project.name}».\n"
-        "Индекс в Qdrant будет пересоздан."
+        f"Отправьте новый файл структуры для проекта «{project.name}».\n" "Индекс в Qdrant будет пересоздан."
     )
     await callback.answer()
 
@@ -103,8 +104,8 @@ async def handle_update_file(message: Message, state: FSMContext):
     :param state: The current FSM context holding the target project ID.
     :return: None
     """
+    from services.indexer import delete_project_index, index_project
     from services.project_parser import parse
-    from services.indexer import index_project, delete_project_index
 
     data = await state.get_data()
     project_id = data.get("update_project_id")
@@ -118,6 +119,7 @@ async def handle_update_file(message: Message, state: FSMContext):
     if message.document:
         file = await message.bot.get_file(message.document.file_id)
         import io
+
         buf = io.BytesIO()
         await message.bot.download_file(file.file_path, destination=buf)
         content = buf.getvalue()  # raw bytes; parse() handles decoding
@@ -140,9 +142,7 @@ async def handle_update_file(message: Message, state: FSMContext):
     )
 
     await msg.edit_text(
-        f"Структура обновлена.\n"
-        f"Файлов в индексе: {count}\n"
-        f"Технологии: {', '.join(parsed.tech_stack) or '—'}"
+        f"Структура обновлена.\n" f"Файлов в индексе: {count}\n" f"Технологии: {', '.join(parsed.tech_stack) or '—'}"
     )
 
 
@@ -218,8 +218,7 @@ async def cb_add_project(callback: CallbackQuery, state: FSMContext):
     """
     await state.set_state(ProjectStates.awaiting_file)
     await callback.message.answer(
-        "Отправьте файл структуры проекта (JSON или TXT).\n"
-        "Или напишите описание стека текстом."
+        "Отправьте файл структуры проекта (JSON или TXT).\n" "Или напишите описание стека текстом."
     )
     await callback.answer()
 
@@ -248,26 +247,47 @@ async def handle_project_file(message: Message, state: FSMContext):
 @router.message(ProjectStates.awaiting_name)
 async def handle_project_name(message: Message, state: FSMContext):
     """
-    Parse the project structure, persist the project, index it in Qdrant, and confirm.
+    Store the project name and prompt for an optional description.
 
     :param message: The incoming message containing the project name.
     :param state: The current FSM context holding the uploaded file or text content.
     :return: None
     """
-    from services.project_parser import parse
-    from services.indexer import index_project
+    await state.update_data(project_name=message.text.strip())
+    await state.set_state(ProjectStates.awaiting_description)
+    await message.answer(
+        "Кратко опишите проект: назначение, архитектурные особенности, "
+        "что важно учитывать при оценке задач.\n\n"
+        "Или отправьте /skip чтобы пропустить."
+    )
 
-    name = message.text.strip()
+
+@router.message(ProjectStates.awaiting_description)
+async def handle_project_description(message: Message, state: FSMContext):
+    """
+    Create and index the project with the optional description provided.
+
+    :param message: The incoming message with a description text or /skip command.
+    :param state: The current FSM context holding the file and project name.
+    :return: None
+    """
+    from services.indexer import index_project
+    from services.project_parser import parse
+
+    text = (message.text or "").strip()
+    description = "" if text == "/skip" else text
+
     data = await state.get_data()
     await state.clear()  # clear early so a crash later doesn't leave a stale state
+    name = data["project_name"]
 
     content: str | bytes = b""
     if "file_id" in data:
-        bot = message.bot
-        file = await bot.get_file(data["file_id"])
         import io
+
+        file = await message.bot.get_file(data["file_id"])
         buf = io.BytesIO()
-        await bot.download_file(file.file_path, destination=buf)
+        await message.bot.download_file(file.file_path, destination=buf)
         content = buf.getvalue()  # raw bytes; parse() handles decoding
     elif "text_content" in data:
         content = data["text_content"]
@@ -276,15 +296,15 @@ async def handle_project_name(message: Message, state: FSMContext):
     project = await projects_db.create_project(
         user_id=message.from_user.id,
         name=name,
+        description=description,
         tech_stack=parsed.tech_stack,
         structure_raw=parsed.raw,
     )
     # set as active immediately so subsequent /estimate commands pick up the new project
     await users_db.set_active_project(message.from_user.id, project.project_id)
 
-    # send a progress message first; edit it once indexing completes
     msg = await message.answer(f"Проект «{name}» создан. Индексирую структуру...")
-    count = await index_project(project.project_id, parsed)
+    count = await index_project(project.project_id, parsed, description=description)
     await msg.edit_text(
         f"Проект «{name}» создан и проиндексирован.\n"
         f"Файлов в индексе: {count}\n"
