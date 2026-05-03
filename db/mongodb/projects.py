@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 CRUD helpers for the 'projects' collection.
 """
@@ -6,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from db.mongodb.client import get_database
-from db.mongodb.models import Project
+from db.mongodb.models import Project, ProjectTemplate
 
 
 async def get_project(project_id: str) -> Optional[Project]:
@@ -73,3 +74,28 @@ async def delete_project(project_id: str) -> None:
     :return: None
     """
     await get_database()["projects"].delete_one({"project_id": project_id})
+
+
+async def add_template(project_id: str, template: ProjectTemplate) -> None:
+    """
+    Append a template to the project's templates list.
+
+    Uses $push so concurrent saves don't race. Templates are capped at 50 per project
+    to prevent unbounded growth; oldest entries are dropped if the limit is exceeded.
+
+    :param project_id: Project UUID string.
+    :param template: Fully-constructed ProjectTemplate instance.
+    :return: None
+    """
+    await get_database()["projects"].update_one(
+        {"project_id": project_id},
+        {
+            "$push": {
+                "templates": {
+                    "$each": [template.model_dump()],
+                    "$slice": -50,  # keep the most recent 50
+                }
+            },
+            "$set": {"updated_at": datetime.now(timezone.utc)},
+        },
+    )

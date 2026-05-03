@@ -85,13 +85,36 @@ def _build_prompt(state: AgentState) -> str:
     return "\n\n".join(parts)
 
 
+def _already_clarifying(conversation_history: list) -> bool:
+    """
+    Return True if the last assistant message in history contains questions.
+
+    When the bot already asked clarifying questions, the current user_input
+    is an answer — no further clarification should be triggered.
+
+    :param conversation_history: List of role/content message dicts.
+    :return: True if last assistant message ends a clarification exchange.
+    """
+    for msg in reversed(conversation_history):
+        if msg.get("role") == "assistant":
+            return "?" in msg.get("content", "")
+    return False
+
+
 async def clarification_node(state: AgentState) -> dict:
     """
     Set clarification_needed=True and generate questions if the task is vague.
 
+    Skips clarification if the conversation history shows the bot already asked
+    questions — the current user_input is treated as the answer in that case.
+
     :param state: Current agent state.
     :return: Updated state dict with clarification_needed, clarification_question, and tokens_used.
     """
+    history = state.get("conversation_history", [])
+    if _already_clarifying(history):
+        return {"clarification_needed": False, "clarification_question": ""}
+
     if not _needs_clarification(state["user_input"]):  # task is specific enough
         return {"clarification_needed": False, "clarification_question": ""}
 

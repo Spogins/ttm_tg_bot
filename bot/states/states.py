@@ -10,10 +10,12 @@ class ProjectStates(StatesGroup):
     States for the project creation and update conversation flow.
     """
 
-    awaiting_file = State()
     awaiting_name = State()
     awaiting_description = State()
-    awaiting_update_file = State()
+    awaiting_stack = State()
+    awaiting_update_description = State()
+    awaiting_update_stack = State()
+    awaiting_template_name = State()  # user types a short label before saving a template
 
 
 class EstimationStates(StatesGroup):
@@ -21,9 +23,11 @@ class EstimationStates(StatesGroup):
     States for the task estimation conversation flow.
     """
 
+    selecting_scope = State()
     awaiting_task = State()
     clarifying = State()
-    confirming = State()
+    selecting_mode = State()
+    confirming_breakdown = State()
     awaiting_actual_hours = State()
 
 

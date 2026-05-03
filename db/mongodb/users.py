@@ -1,7 +1,8 @@
+# -*- coding: utf-8 -*-
 """
 CRUD helpers and token-limit logic for the 'users' collection.
 """
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from db.mongodb.client import get_database
@@ -65,20 +66,31 @@ async def increment_tokens(user_id: int, amount: int) -> None:
     if not user:
         return
 
-    # base update always increments both counters
-    update: dict = {"$inc": {"tokens.daily_used": amount, "tokens.monthly_used": amount}}
+    daily_expired = now >= user.tokens.daily_reset_at + timedelta(days=1)
+    monthly_expired = now >= user.tokens.monthly_reset_at + timedelta(days=30)
 
-    if now >= user.tokens.daily_reset_at + timedelta(days=1):
-        # window expired: replace $inc with $set to reset the counter to the new amount
-        update["$set"] = {
-            "tokens.daily_used": amount,
-            "tokens.daily_reset_at": now,
-        }
+    # A field must appear in exactly one operator — never in both $inc and $set.
+    # When the window has expired we $set (reset to amount); otherwise we $inc.
+    set_fields: dict = {}
+    inc_fields: dict = {}
 
-    if now >= user.tokens.monthly_reset_at + timedelta(days=30):
-        monthly_set = {"tokens.monthly_used": amount, "tokens.monthly_reset_at": now}
-        # merge into existing $set (if daily reset already created it) without clobbering it
-        update.setdefault("$set", {}).update(monthly_set)
+    if daily_expired:
+        set_fields["tokens.daily_used"] = amount
+        set_fields["tokens.daily_reset_at"] = now
+    else:
+        inc_fields["tokens.daily_used"] = amount
+
+    if monthly_expired:
+        set_fields["tokens.monthly_used"] = amount
+        set_fields["tokens.monthly_reset_at"] = now
+    else:
+        inc_fields["tokens.monthly_used"] = amount
+
+    update: dict = {}
+    if inc_fields:
+        update["$inc"] = inc_fields
+    if set_fields:
+        update["$set"] = set_fields
 
     await db["users"].update_one({"user_id": user_id}, update)
 
@@ -96,7 +108,7 @@ async def check_token_limits(user_id: int, daily_limit: int, monthly_limit: int)
     if not user:
         return True, ""
     if user.tokens.daily_used >= daily_limit:
-        return False, f"Дневной лимит токенов исчерпан ({daily_limit:,}). Попробуйте завтра."
+        return False, f"Дневной лимит токенов исчерпан ({daily_limit:,}). Попробуйте завтра."  # noqa: E231
     if user.tokens.monthly_used >= monthly_limit:
-        return False, f"Месячный лимит токенов исчерпан ({monthly_limit:,})."
+        return False, f"Месячный лимит токенов исчерпан ({monthly_limit:,})."  # noqa: E231
     return True, ""

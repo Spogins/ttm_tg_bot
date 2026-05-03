@@ -31,7 +31,7 @@ async def project_context_node(state: AgentState) -> dict:
 
     # description is always relevant — prepend so it's never pushed out by search ranking
     project = await projects_db.get_project(project_id)
-    if project and project.description:
+    if project and project.user_id == state["user_id"] and project.description:
         chunks.insert(0, f"Project description: {project.description}")
 
     logger.info(f"project_context_node: {len(chunks)} chunks for project={project_id}")

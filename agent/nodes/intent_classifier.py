@@ -29,16 +29,23 @@ async def intent_classifier(state: AgentState) -> dict:
     """
     Classify user_input intent with Haiku; falls back to 'unknown' on error.
 
+    Includes the last 2 conversation history messages so that clarification
+    answers are correctly classified as 'estimate' rather than 'unknown'.
+
     :param state: Current agent state.
     :return: Updated state dict with intent and tokens_used.
     """
     client = get_client()
     try:
+        # prepend last 2 history turns so the classifier sees clarification context
+        messages = [{"role": m["role"], "content": m["content"]} for m in state.get("conversation_history", [])[-2:]]
+        messages.append({"role": "user", "content": state["user_input"]})
+
         response = await client.messages.create(
             model=HAIKU_MODEL,
             max_tokens=10,
             system=_SYSTEM,
-            messages=[{"role": "user", "content": state["user_input"]}],
+            messages=messages,
         )
         raw: str = response.content[0].text.strip().lower()
         intent: Intent = (

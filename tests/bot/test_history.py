@@ -51,15 +51,15 @@ class TestFormatHistory:
         text = _format_history([est])
         assert "7.0 ч реально" in text
 
-    def test_row_shows_dash_when_no_actual(self):
+    def test_row_shows_in_progress_status_when_no_actual(self):
         est = _make_estimation("Fix bug", 5.5)
         text = _format_history([est])
-        assert "→  —" in text
+        assert "в процессе" in text
 
-    def test_row_contains_date(self):
-        est = _make_estimation("Fix bug", 5.5, month=4, day=23)
+    def test_row_shows_done_status_with_actual(self):
+        est = _make_estimation("Fix bug", 5.5, actual_hours=7.0)
         text = _format_history([est])
-        assert "23 апр" in text
+        assert "реально" in text
 
     def test_numbering_starts_at_one(self):
         est = _make_estimation("Task", 3.0)

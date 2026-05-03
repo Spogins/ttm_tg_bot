@@ -81,6 +81,9 @@ class Estimation(BaseModel):
     complexity: int  # 1–5
     tech_stack: list[str] = Field(default_factory=list)
     breakdown: dict = Field(default_factory=dict)
+    scope: list[str] = Field(default_factory=list)
+    estimation_mode: str = "realistic"
+    status: str = "in_progress"  # in_progress | done | cancelled
     actual_hours: Optional[float] = None
     reminder_at: Optional[datetime] = None
     reminder_sent_at: Optional[datetime] = None
@@ -92,6 +95,31 @@ class Estimation(BaseModel):
         """Attach UTC timezone to naive datetimes returned by MongoDB."""
         if v is None:
             return v
+        return _as_utc(v)
+
+
+class ProjectTemplate(BaseModel):
+    """
+    A saved task template derived from a completed estimation with known actual hours.
+
+    Used as few-shot context when estimating similar tasks in the same project.
+    """
+
+    template_id: str
+    estimation_id: str
+    name: str  # short human-readable label (task[:60])
+    task: str  # full task description
+    total_hours: float
+    actual_hours: float
+    deviation_pct: float  # (actual - planned) / planned * 100; positive = underestimated
+    scope: list[str] = Field(default_factory=list)
+    tech_stack: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utcnow)
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def ensure_utc(cls, v: datetime) -> datetime:
+        """Attach UTC timezone to naive datetimes returned by MongoDB."""
         return _as_utc(v)
 
 
@@ -108,6 +136,8 @@ class Project(BaseModel):
     structure_raw: dict = Field(default_factory=dict)
     qdrant_collection: str = ""  # populated after indexing; empty means not yet indexed
     files_indexed: int = 0
+    default_scope: list[str] = Field(default_factory=list)  # last scope used for estimation in this project
+    templates: list[ProjectTemplate] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

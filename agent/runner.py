@@ -13,7 +13,12 @@ from db.mongodb import users as users_db
 _ERROR_RESPONSE = "Произошла ошибка при обработке запроса. Попробуйте ещё раз."
 
 
-async def run_agent(user_id: int, user_input: str, project_id: str | None = None) -> dict:
+async def run_agent(
+    user_id: int,
+    user_input: str,
+    project_id: str | None = None,
+    scope: list[str] | None = None,
+) -> dict:
     """
     Run the full estimation pipeline and return the complete final state.
 
@@ -23,6 +28,7 @@ async def run_agent(user_id: int, user_input: str, project_id: str | None = None
     :param user_id: Telegram user ID.
     :param user_input: Raw text from the user (already transcribed if voice).
     :param project_id: Active project UUID, or None if no project is selected.
+    :param scope: Optional list of scope labels (e.g. ["backend", "qa"]).
     :return: Final AgentState dict; on error contains only 'formatted_response'.
     """
     conversation_history = await history_db.get_history(user_id)
@@ -44,6 +50,7 @@ async def run_agent(user_id: int, user_input: str, project_id: str | None = None
         "sprint_hours_per_day": None,
         "sprint_tasks": None,
         "sprint_plan": None,
+        "scope": scope or [],
     }
 
     try:
@@ -115,6 +122,7 @@ async def run_sprint_agent(
         "sprint_hours_per_day": hours_per_day,
         "sprint_tasks": tasks,
         "sprint_plan": None,
+        "scope": [],
     }
 
     try:

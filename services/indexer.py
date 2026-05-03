@@ -11,10 +11,11 @@ from qdrant_client.models import Distance, PointStruct
 
 from config.settings import settings
 from db.mongodb import projects as projects_db
+from db.mongodb.models import ProjectTemplate
 from db.qdrant.client import ensure_collection, get_client
 from services.project_parser import ParsedProject
 
-ChunkType = Literal["description", "structure", "module", "tech"]
+ChunkType = Literal["description", "structure", "module", "tech", "template"]
 
 EMBEDDING_DIM = 1024  # voyage-code-3
 COLLECTION_PREFIX = "project"
@@ -123,12 +124,65 @@ async def search_project(project_id: str, query: str, limit: int = 5) -> list[di
     vectors = await _embed([query])
 
     client = get_client()
-    results = await client.search(
+    response = await client.query_points(
         collection_name=collection,
-        query_vector=vectors[0],
+        query=vectors[0],
         limit=limit,
     )
-    return [{"text": r.payload["text"], "type": r.payload["type"], "score": r.score} for r in results]
+    return [{"text": r.payload["text"], "type": r.payload["type"], "score": r.score} for r in response.points]
+
+
+async def index_template(project_id: str, template: ProjectTemplate) -> None:
+    """
+    Embed a completed-estimation template and upsert it into the project's Qdrant collection.
+
+    Templates are stored with ``type="template"`` so ``search_project`` returns them alongside
+    structure chunks; callers can recognise them by checking ``result["type"] == "template"``.
+
+    The text indexed encodes all fields useful as few-shot context for the LLM: task description,
+    planned/actual hours, deviation, and scope.
+
+    :param project_id: Project UUID used to derive the collection name.
+    :param template: Fully-constructed ProjectTemplate instance.
+    :return: None
+    """
+    collection = f"{COLLECTION_PREFIX}_{project_id}_docs"
+    await ensure_collection(collection, vector_size=EMBEDDING_DIM, distance=Distance.COSINE)
+
+    sign = "+" if template.deviation_pct >= 0 else ""
+    scope_str = ", ".join(template.scope) if template.scope else "—"
+    text = (
+        f"Template: {template.name}\n"
+        f"Task: {template.task}\n"
+        f"Planned: {template.total_hours}h | Actual: {template.actual_hours}h | "
+        f"Deviation: {sign}{template.deviation_pct:.0f}%\n"  # noqa: E231
+        f"Scope: {scope_str}"
+    )
+
+    vectors = await _embed([text])
+
+    # UUID-derived point ID: top 63 bits of the template UUID, stable across process restarts.
+    # hash() is PYTHONHASHSEED-dependent and would produce different IDs after restart,
+    # causing duplicate Qdrant points that are never cleaned up.
+    import uuid as _uuid
+
+    point_id = _uuid.UUID(template.template_id).int >> 65
+    point = PointStruct(
+        id=point_id,
+        vector=vectors[0],
+        payload={
+            "text": text,
+            "type": "template",
+            "template_id": template.template_id,
+            "deviation_pct": template.deviation_pct,
+            "total_hours": template.total_hours,
+            "actual_hours": template.actual_hours,
+        },
+    )
+
+    client = get_client()
+    await client.upsert(collection_name=collection, points=[point])
+    logger.info(f"Indexed template {template.template_id} for project {project_id}")
 
 
 async def delete_project_index(project_id: str) -> None:

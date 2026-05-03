@@ -162,13 +162,30 @@ def parse_txt(text: str) -> ParsedProject:
     return ParsedProject(files=files, tech_stack=tech, modules=modules, raw={"raw_text": text})
 
 
+def _looks_like_tech_list(text: str) -> bool:
+    """Return True if text looks like a comma/newline-separated list of tech names."""
+    items = [t.strip() for t in re.split(r"[,\n]+", text) if t.strip()]
+    if len(items) < 2:
+        return False
+    # each item should be short (≤4 words) — real descriptions are longer
+    return all(len(item.split()) <= 4 for item in items)
+
+
 def parse_text_description(text: str) -> ParsedProject:
     """
-    Extract known technology names from a free-form text description.
+    Extract tech stack from a free-form text description or a direct comma-separated list.
+
+    When the input looks like a list (e.g. "Django, Docker, Redis"), items are taken as-is
+    so users aren't limited to a hardcoded vocabulary.
 
     :param text: Free-form user text describing the project.
     :return: ParsedProject with detected tech stack; files and modules are empty.
     """
+    if _looks_like_tech_list(text):
+        items = [t.strip() for t in re.split(r"[,\n]+", text) if t.strip()]
+        tech = sorted(set(items))
+        return ParsedProject(files=[], tech_stack=tech, modules=[], raw={"description": text})
+
     known_tech = list(TECH_MARKERS.values()) + [
         "FastAPI",
         "Flask",
@@ -181,11 +198,24 @@ def parse_text_description(text: str) -> ParsedProject:
         "Redis",
         "Kafka",
         "RabbitMQ",
+        "Celery",
+        "Aiogram",
+        "Docker",
+        "Nginx",
+        "SQLAlchemy",
     ]
-    # word boundaries (\b) prevent partial matches, e.g. "Go" matching inside "MongoDB"
     found = [t for t in known_tech if re.search(rf"\b{re.escape(t)}\b", text, re.IGNORECASE)]
     tech = sorted(set(found))
     return ParsedProject(files=[], tech_stack=tech, modules=[], raw={"description": text})
+
+
+def _json_depth(obj, current: int = 0) -> int:
+    """Return the maximum nesting depth of a JSON-decoded object."""
+    if isinstance(obj, dict):
+        return max((_json_depth(v, current + 1) for v in obj.values()), default=current + 1)
+    if isinstance(obj, list):
+        return max((_json_depth(v, current + 1) for v in obj), default=current + 1)
+    return current
 
 
 def parse(content: str | bytes) -> ParsedProject:
@@ -201,6 +231,9 @@ def parse(content: str | bytes) -> ParsedProject:
     # try JSON first (most structured input)
     try:
         data = json.loads(content)
+        # reject pathologically deep structures to prevent stack overflow / memory exhaustion
+        if isinstance(data, (dict, list)) and _json_depth(data) > 50:
+            raise ValueError("JSON nesting too deep")
         return parse_json(data)
     except (json.JSONDecodeError, ValueError):
         pass

@@ -2,7 +2,6 @@
 from bot.keyboards.common import (
     actual_hours_keyboard,
     confirm_delete_keyboard,
-    estimation_keyboard,
     projects_keyboard,
     sprint_result_keyboard,
     start_keyboard,
@@ -32,13 +31,17 @@ class TestActualHoursKeyboard:
 
 
 class TestStartKeyboard:
-    def test_has_one_button(self):
+    def test_has_two_rows(self):
         kb = start_keyboard()
-        assert len(kb.inline_keyboard[0]) == 1
+        assert len(kb.inline_keyboard) == 2
 
-    def test_callback_data_is_add_project(self):
+    def test_first_row_is_add_project(self):
         kb = start_keyboard()
         assert kb.inline_keyboard[0][0].callback_data == "add_project"
+
+    def test_second_row_is_instructions(self):
+        kb = start_keyboard()
+        assert kb.inline_keyboard[1][0].callback_data == "show_instructions"
 
 
 class TestProjectsKeyboard:
@@ -96,21 +99,6 @@ class TestConfirmDeleteKeyboard:
     def test_cancel_callback(self):
         kb = confirm_delete_keyboard("p123")
         assert kb.inline_keyboard[0][1].callback_data == "cancel_delete"
-
-
-class TestEstimationKeyboard:
-    def test_has_three_buttons(self):
-        kb = estimation_keyboard()
-        assert len(kb.inline_keyboard[0]) == 3
-
-    def test_save_callback(self):
-        assert estimation_keyboard().inline_keyboard[0][0].callback_data == "estimation:save"
-
-    def test_adjust_callback(self):
-        assert estimation_keyboard().inline_keyboard[0][1].callback_data == "estimation:adjust"
-
-    def test_details_callback(self):
-        assert estimation_keyboard().inline_keyboard[0][2].callback_data == "estimation:details"
 
 
 class TestSprintResultKeyboard:

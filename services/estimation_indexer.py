@@ -54,12 +54,24 @@ def _estimation_text(estimation: Estimation) -> str:
 
 def _point_id_from_estimation_id(estimation_id: str) -> int:
     """
-    Derive a stable int64 Qdrant point ID from an estimation UUID string.
+    Derive a stable int63 Qdrant point ID from an estimation UUID string.
+
+    Takes the top 63 bits of the UUID integer (right-shift by 65 on the 128-bit
+    UUID int, leaving 63 bits). This is always a valid non-negative int63 and is
+    stable across process restarts, unlike hash() which varies with PYTHONHASHSEED.
 
     :param estimation_id: Estimation UUID string.
-    :return: Non-negative int64 point ID.
+    :return: Non-negative int63 point ID.
     """
-    return abs(hash(estimation_id)) % (2**63)
+    import uuid as _uuid
+
+    try:
+        return _uuid.UUID(estimation_id).int >> 65  # top 63 bits, always fits int63
+    except ValueError:
+        # fallback for non-UUID strings (tests, legacy data)
+        import hashlib
+
+        return int(hashlib.sha256(estimation_id.encode()).hexdigest(), 16) % (2**63)
 
 
 async def index_estimation(estimation: Estimation) -> None:
@@ -107,12 +119,12 @@ async def search_similar(user_id: int, query: str, limit: int = 5) -> list[dict]
 
     try:
         vector = await _embed(query)
-        results = await client.search(
+        response = await client.query_points(
             collection_name=collection,
-            query_vector=vector,
+            query=vector,
             limit=limit,
         )
-        return [r.payload for r in results]  # strip Qdrant wrapper
+        return [r.payload for r in response.points]  # strip Qdrant wrapper
     except Exception as e:
         logger.warning(f"Estimation search failed for user {user_id}: {e}")
         return []  # collection absent for new users

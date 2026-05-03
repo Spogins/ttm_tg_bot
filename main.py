@@ -21,11 +21,13 @@ from services.reminder_scheduler import reminder_scheduler
 
 BOT_COMMANDS = [
     BotCommand(command="start", description="Начать работу"),
-    BotCommand(command="help", description="Помощь"),
-    BotCommand(command="projects", description="Список проектов"),
     BotCommand(command="estimate", description="Оценить задачу"),
-    BotCommand(command="sprint", description="Оценить задачи спринта"),
-    BotCommand(command="stats", description="Статистика"),
+    BotCommand(command="sprint", description="Спланировать спринт"),
+    BotCommand(command="projects", description="Управление проектами"),
+    BotCommand(command="history", description="История оценок"),
+    BotCommand(command="stats", description="Статистика точности"),
+    BotCommand(command="instructions", description="Как пользоваться ботом"),
+    BotCommand(command="help", description="Список команд"),
     BotCommand(command="cancel", description="Отменить текущее действие"),
 ]
 

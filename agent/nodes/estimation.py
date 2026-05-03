@@ -36,6 +36,10 @@ def _build_user_prompt(state: AgentState, experience_level: str) -> str:
     """
     Compose the full user-side prompt from project context, history, and task text.
 
+    Template chunks (payload text starting with "Template:") are separated from regular
+    project context and injected as a dedicated few-shot section so the model can calibrate
+    its estimate against real historical deviation data.
+
     :param state: Current agent state.
     :param experience_level: Developer experience level from user settings (junior/mid/senior).
     :return: Assembled prompt string.
@@ -43,8 +47,19 @@ def _build_user_prompt(state: AgentState, experience_level: str) -> str:
     lines: list[str] = []
 
     if state.get("project_context"):
-        ctx = "\n".join(state["project_context"])
-        lines.append(f"## Project context\n{ctx}")
+        all_chunks: list[str] = state["project_context"]
+        template_chunks = [c for c in all_chunks if c.startswith("Template:")]
+        context_chunks = [c for c in all_chunks if not c.startswith("Template:")]
+
+        if context_chunks:
+            ctx = "\n".join(context_chunks)
+            lines.append(f"## Project context\n{ctx}")
+
+        if template_chunks:
+            lines.append(
+                "## Project templates (completed tasks with real hours)\n"
+                "Use these as calibration data — note the deviation column:\n" + "\n".join(template_chunks)
+            )
 
     if state.get("similar_tasks"):
         parts = []
@@ -61,6 +76,21 @@ def _build_user_prompt(state: AgentState, experience_level: str) -> str:
             content = msg.get("content", "")
             history_lines.append(f"{role}: {content}")
         lines.append("## Conversation history\n" + "\n".join(history_lines))
+
+    if state.get("scope"):
+        _SCOPE_LABELS = {
+            "backend": "Backend",
+            "frontend": "Frontend",
+            "fullstack": "Backend + Frontend",
+            "qa": "QA/Testing",
+            "devops": "DevOps/Infrastructure",
+        }
+        scope_str = ", ".join(_SCOPE_LABELS.get(s, s) for s in state["scope"])
+        lines.append(
+            f"## Scope\n"
+            f"Estimate ONLY the following areas: {scope_str}. "
+            f"Do not include subtasks outside this scope."
+        )
 
     lines.append(f"## Developer experience level\n{experience_level}")
     lines.append(f"## Task to estimate\n{state['user_input']}")
@@ -92,7 +122,7 @@ def _parse_result(text: str) -> EstimationResult | None:
             confidence=data["confidence"],
         )
     except Exception as e:
-        logger.error(f"estimation_node parse error: {e}\nraw={raw[:300]}")
+        logger.error(f"estimation_node parse error: {e}")
         return None  # caller retries on None
 
 

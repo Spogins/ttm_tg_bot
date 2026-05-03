@@ -2,13 +2,16 @@
 """
 Middleware that transparently transcribes voice messages before they reach handlers.
 """
+import os
 import tempfile
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
+from aiogram.fsm.context import FSMContext
 from aiogram.types import ContentType, Message
 from loguru import logger
 
+from bot.keyboards.common import voice_confirm_keyboard
 from services.transcription import transcribe
 
 
@@ -40,6 +43,7 @@ class VoiceTranscriptionMiddleware(BaseMiddleware):
 
         await event.answer("🎙 Распознаю голосовое сообщение...")
 
+        tmp_path: str | None = None
         try:
             file = await bot.get_file(voice.file_id)
             # delete=False keeps the file after the context manager exits so transcribe() can read it
@@ -53,9 +57,18 @@ class VoiceTranscriptionMiddleware(BaseMiddleware):
                 await event.answer("Не удалось распознать речь. Попробуйте ещё раз.")
                 return
 
-            # aiogram Message is a frozen Pydantic model; bypass normal assignment to inject the transcript
-            object.__setattr__(event, "text", text)
             logger.info(f"Voice transcribed for user {event.from_user.id}: {text[:60]}")
+
+            fsm_context: FSMContext = data.get("state")
+            if fsm_context:
+                await fsm_context.update_data(pending_voice_transcript=text)
+
+            await event.answer(
+                f"🎙 <b>Распознанный текст:</b>\n\n{text}",  # noqa: E231
+                parse_mode="HTML",
+                reply_markup=voice_confirm_keyboard(),
+            )
+            return  # do not call handler — wait for user confirmation
 
         except RuntimeError as e:
             await event.answer(str(e))
@@ -64,5 +77,9 @@ class VoiceTranscriptionMiddleware(BaseMiddleware):
             logger.error(f"Voice middleware error: {e}")
             await event.answer("Ошибка при распознавании. Попробуйте текстом.")
             return
-
-        return await handler(event, data)
+        finally:
+            if tmp_path is not None:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass

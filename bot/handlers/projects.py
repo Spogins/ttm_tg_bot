@@ -44,6 +44,17 @@ async def cmd_projects(message: Message, user=None):
     )
 
 
+@router.callback_query(F.data == "project:noop")
+async def cb_project_noop(callback: CallbackQuery):
+    """
+    Silently acknowledge taps on the active-project checkmark button.
+
+    :param callback: Callback query with 'project:noop' data.
+    :return: None
+    """
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("select_project:"))
 async def cb_select_project(callback: CallbackQuery):
     """
@@ -52,31 +63,36 @@ async def cb_select_project(callback: CallbackQuery):
     :param callback: The callback query from the inline button press.
     :return: None
     """
-    project_id = callback.data.split(":", 1)[1]  # limit=1 so UUIDs with colons aren't split
+    project_id = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id
 
     project = await projects_db.get_project(project_id)
     if not project:
         await callback.answer("Проект не найден.", show_alert=True)
         return
+    if project.user_id != user_id:
+        await callback.answer("Этот проект вам не принадлежит.", show_alert=True)
+        return
 
     await users_db.set_active_project(user_id, project_id)
 
-    # re-fetch the full list and edit the keyboard in-place to reflect the new active project
     project_list = await projects_db.get_user_projects(user_id)
-    await callback.message.edit_reply_markup(
-        reply_markup=projects_keyboard(
-            [p.model_dump() for p in project_list],
-            active_project_id=project_id,
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=projects_keyboard(
+                [p.model_dump() for p in project_list],
+                active_project_id=project_id,
+            )
         )
-    )
+    except Exception:
+        pass  # "message is not modified" on stale callbacks — safe to ignore
     await callback.answer(f"Активный проект: {project.name}")
 
 
 @router.callback_query(F.data.startswith("update_project:"))
 async def cb_update_project(callback: CallbackQuery, state: FSMContext):
     """
-    Enter the awaiting_update_file state so the user can upload a new structure file.
+    Show the project card and ask for a new description before updating.
 
     :param callback: The callback query from the inline button press.
     :param state: The current FSM context.
@@ -87,63 +103,94 @@ async def cb_update_project(callback: CallbackQuery, state: FSMContext):
     if not project:
         await callback.answer("Проект не найден.", show_alert=True)
         return
-    await state.set_state(ProjectStates.awaiting_update_file)
+    if project.user_id != callback.from_user.id:
+        await callback.answer("Этот проект вам не принадлежит.", show_alert=True)
+        return
+
+    await state.set_state(ProjectStates.awaiting_update_description)
     await state.update_data(update_project_id=project_id)
+
+    stack = ", ".join(project.tech_stack) if project.tech_stack else "—"
+    updated = project.updated_at.strftime("%d.%m.%Y %H:%M")
+    description_line = f"📝 {project.description}\n" if project.description else ""
     await callback.message.answer(
-        f"Отправьте новый файл структуры для проекта «{project.name}».\n" "Индекс в Qdrant будет пересоздан."
+        f"<b>📁 {project.name}</b>\n"
+        f"{description_line}"
+        f"🛠 Стек: {stack}\n"
+        f"🕐 Обновлён: {updated}\n\n"
+        "Введите новое описание проекта или /skip чтобы оставить текущее.",
+        parse_mode="HTML",
     )
     await callback.answer()
 
 
-@router.message(ProjectStates.awaiting_update_file)
-async def handle_update_file(message: Message, state: FSMContext):
+@router.message(ProjectStates.awaiting_update_description)
+async def handle_update_description(message: Message, state: FSMContext):
     """
-    Re-parse and re-index the project structure from the uploaded file or text.
+    Store the new description and ask for the updated tech stack.
 
-    :param message: The incoming message with a document or text payload.
+    :param message: The incoming message with description text or /skip.
     :param state: The current FSM context holding the target project ID.
     :return: None
     """
+    text = (message.text or "").strip()
+    if text == "/skip":
+        data = await state.get_data()
+        project = await projects_db.get_project(data.get("update_project_id", ""))
+        description = project.description if project else ""
+        await state.update_data(update_description=description)
+    else:
+        await state.update_data(update_description=text)
+
+    await state.set_state(ProjectStates.awaiting_update_stack)
+    await message.answer(
+        "Введите новый стек технологий через запятую:\n\n" "<code>Django, PostgreSQL, Redis, React, Docker</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(ProjectStates.awaiting_update_stack)
+async def handle_update_stack(message: Message, state: FSMContext):
+    """
+    Normalize the stack via Claude, re-index the project, and update MongoDB.
+
+    :param message: The incoming message with a tech stack list.
+    :param state: The current FSM context holding project ID and description.
+    :return: None
+    """
     from services.indexer import delete_project_index, index_project
-    from services.project_parser import parse
+    from services.project_claude import extract_tech_stack
+    from services.project_parser import ParsedProject
+
+    if not message.text or not message.text.strip():
+        await message.answer("Введите стек технологий текстом.")
+        return
 
     data = await state.get_data()
     project_id = data.get("update_project_id")
-    await state.clear()  # clear early so a crash later doesn't leave a stale state
+    description = data.get("update_description", "")
+    await state.clear()
 
     if not project_id:
         await message.answer("Ошибка: проект не найден. Начните заново.")
         return
 
-    content: str | bytes = b""
-    if message.document:
-        file = await message.bot.get_file(message.document.file_id)
-        import io
+    msg = await message.answer("Анализирую стек через Claude ✨")
+    tech_stack = await extract_tech_stack(message.text.strip(), description)
+    parsed = ParsedProject(files=[], tech_stack=tech_stack, modules=[], raw={"description": description})
 
-        buf = io.BytesIO()
-        await message.bot.download_file(file.file_path, destination=buf)
-        content = buf.getvalue()  # raw bytes; parse() handles decoding
-    elif message.text:
-        content = message.text
-    else:
-        await message.answer("Отправьте файл или текстовое описание.")
-        return
-
-    msg = await message.answer("Пересоздаю индекс...")
-    parsed = parse(content)
-
+    await msg.edit_text("Пересоздаю индекс...")
     await delete_project_index(project_id)
-    count = await index_project(project_id, parsed)
+    count = await index_project(project_id, parsed, description=description)
     await projects_db.update_project(
         project_id,
+        description=description,
         tech_stack=parsed.tech_stack,
         structure_raw=parsed.raw,
         files_indexed=count,
     )
 
-    await msg.edit_text(
-        f"Структура обновлена.\n" f"Файлов в индексе: {count}\n" f"Технологии: {', '.join(parsed.tech_stack) or '—'}"
-    )
+    await msg.edit_text(f"✅ Структура обновлена.\n" f"Технологии: {', '.join(parsed.tech_stack) or '—'}")
 
 
 @router.callback_query(F.data.startswith("delete_project:"))
@@ -159,6 +206,9 @@ async def cb_delete_project(callback: CallbackQuery):
     if not project:
         await callback.answer("Проект не найден.", show_alert=True)
         return
+    if project.user_id != callback.from_user.id:
+        await callback.answer("Этот проект вам не принадлежит.", show_alert=True)
+        return
     await callback.message.answer(
         f"Удалить проект «{project.name}»?\nЭто действие нельзя отменить.",
         reply_markup=confirm_delete_keyboard(project_id),
@@ -169,7 +219,7 @@ async def cb_delete_project(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("confirm_delete:"))
 async def cb_confirm_delete(callback: CallbackQuery):
     """
-    Delete the project from MongoDB and its Qdrant vector index.
+    Delete the project from MongoDB and its Qdrant vector index, then show the updated list.
 
     :param callback: The callback query from the confirmation button press.
     :return: None
@@ -183,15 +233,33 @@ async def cb_confirm_delete(callback: CallbackQuery):
     if not project:
         await callback.answer("Проект не найден.", show_alert=True)
         return
+    if project.user_id != user_id:
+        await callback.answer("Этот проект вам не принадлежит.", show_alert=True)
+        return
 
     await delete_project_index(project_id)
     await projects_db.delete_project(project_id)
 
     user = await users_db.get_user(user_id)
-    if user and user.active_project_id == project_id:
+    was_active = user is not None and user.active_project_id == project_id
+    if was_active:
         await users_db.set_active_project(user_id, None)
+    active_id = None if was_active else (user.active_project_id if user else None)
 
     await callback.message.edit_text(f"Проект «{project.name}» удалён.")
+
+    project_list = await projects_db.get_user_projects(user_id)
+    if project_list:
+        await callback.message.answer(
+            f"Ваши проекты ({len(project_list)}):",  # noqa: E231
+            reply_markup=projects_keyboard(
+                [p.model_dump() for p in project_list],
+                active_project_id=active_id,
+            ),
+        )
+    else:
+        await callback.message.answer("Проектов больше нет.", reply_markup=start_keyboard())
+
     await callback.answer()
 
 
@@ -210,38 +278,15 @@ async def cb_cancel_delete(callback: CallbackQuery):
 @router.callback_query(F.data == "add_project")
 async def cb_add_project(callback: CallbackQuery, state: FSMContext):
     """
-    Start the new-project flow by entering the awaiting_file state.
+    Start the new-project flow by asking for the project name.
 
     :param callback: The callback query from the add-project button press.
     :param state: The current FSM context.
     :return: None
     """
-    await state.set_state(ProjectStates.awaiting_file)
-    await callback.message.answer(
-        "Отправьте файл структуры проекта (JSON или TXT).\n" "Или напишите описание стека текстом."
-    )
-    await callback.answer()
-
-
-@router.message(ProjectStates.awaiting_file)
-async def handle_project_file(message: Message, state: FSMContext):
-    """
-    Store the uploaded file or text in FSM data and ask for a project name.
-
-    :param message: The incoming message with a document or text payload.
-    :param state: The current FSM context.
-    :return: None
-    """
-    if message.document:
-        await state.update_data(file_id=message.document.file_id, file_name=message.document.file_name)
-    elif message.text:
-        await state.update_data(text_content=message.text)
-    else:
-        await message.answer("Отправьте файл или текстовое описание.")
-        return
-
     await state.set_state(ProjectStates.awaiting_name)
-    await message.answer("Введите название проекта:")
+    await callback.message.answer("Введите название проекта:")
+    await callback.answer()
 
 
 @router.message(ProjectStates.awaiting_name)
@@ -250,7 +295,7 @@ async def handle_project_name(message: Message, state: FSMContext):
     Store the project name and prompt for an optional description.
 
     :param message: The incoming message containing the project name.
-    :param state: The current FSM context holding the uploaded file or text content.
+    :param state: The current FSM context.
     :return: None
     """
     await state.update_data(project_name=message.text.strip())
@@ -265,34 +310,48 @@ async def handle_project_name(message: Message, state: FSMContext):
 @router.message(ProjectStates.awaiting_description)
 async def handle_project_description(message: Message, state: FSMContext):
     """
-    Create and index the project with the optional description provided.
+    Store the description and prompt for the tech stack.
 
     :param message: The incoming message with a description text or /skip command.
-    :param state: The current FSM context holding the file and project name.
+    :param state: The current FSM context holding the project name.
+    :return: None
+    """
+    text = (message.text or "").strip()
+    description = "" if text == "/skip" else text
+    await state.update_data(project_description=description)
+    await state.set_state(ProjectStates.awaiting_stack)
+    await message.answer(
+        "Введите стек технологий через запятую:\n\n" "<code>Django, PostgreSQL, Redis, React, Docker</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(ProjectStates.awaiting_stack)
+async def handle_project_stack(message: Message, state: FSMContext):
+    """
+    Normalize the stack via Claude, create the project, and index it in Qdrant.
+
+    :param message: The incoming message with a tech stack list.
+    :param state: The current FSM context holding the project name and description.
     :return: None
     """
     from services.indexer import index_project
-    from services.project_parser import parse
+    from services.project_claude import extract_tech_stack
+    from services.project_parser import ParsedProject
 
-    text = (message.text or "").strip()
-    description = "" if text == "/skip" else text
+    if not message.text or not message.text.strip():
+        await message.answer("Введите стек технологий текстом.")
+        return
 
     data = await state.get_data()
-    await state.clear()  # clear early so a crash later doesn't leave a stale state
+    await state.clear()
     name = data["project_name"]
+    description = data.get("project_description", "")
 
-    content: str | bytes = b""
-    if "file_id" in data:
-        import io
+    msg = await message.answer(f"Создаю проект «{name}»... Анализирую стек через Claude ✨")
+    tech_stack = await extract_tech_stack(message.text.strip(), description)
+    parsed = ParsedProject(files=[], tech_stack=tech_stack, modules=[], raw={"description": description})
 
-        file = await message.bot.get_file(data["file_id"])
-        buf = io.BytesIO()
-        await message.bot.download_file(file.file_path, destination=buf)
-        content = buf.getvalue()  # raw bytes; parse() handles decoding
-    elif "text_content" in data:
-        content = data["text_content"]
-
-    parsed = parse(content)
     project = await projects_db.create_project(
         user_id=message.from_user.id,
         name=name,
@@ -300,13 +359,9 @@ async def handle_project_description(message: Message, state: FSMContext):
         tech_stack=parsed.tech_stack,
         structure_raw=parsed.raw,
     )
-    # set as active immediately so subsequent /estimate commands pick up the new project
     await users_db.set_active_project(message.from_user.id, project.project_id)
 
-    msg = await message.answer(f"Проект «{name}» создан. Индексирую структуру...")
-    count = await index_project(project.project_id, parsed, description=description)
+    await index_project(project.project_id, parsed, description=description)
     await msg.edit_text(
-        f"Проект «{name}» создан и проиндексирован.\n"
-        f"Файлов в индексе: {count}\n"
-        f"Технологии: {', '.join(parsed.tech_stack) or '—'}"
+        f"✅ Проект «{name}» создан и проиндексирован.\n" f"Технологии: {', '.join(parsed.tech_stack) or '—'}"
     )

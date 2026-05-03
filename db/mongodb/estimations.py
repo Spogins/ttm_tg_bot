@@ -20,6 +20,8 @@ async def save_estimation(
     project_id: Optional[str] = None,
     project_name: str = "",
     reminder_at: "datetime | None" = None,
+    scope: list[str] | None = None,
+    estimation_mode: str = "realistic",
 ) -> Estimation:
     """
     Create a new estimation document with a generated UUID and persist it.
@@ -44,6 +46,8 @@ async def save_estimation(
         complexity=complexity,
         tech_stack=tech_stack,
         breakdown=breakdown,
+        scope=scope or [],
+        estimation_mode=estimation_mode,
         reminder_at=reminder_at,
     )
     await get_database()["estimations"].insert_one(estimation.model_dump())
@@ -59,6 +63,20 @@ async def get_estimation(estimation_id: str) -> Optional[Estimation]:
     """
     doc = await get_database()["estimations"].find_one({"estimation_id": estimation_id})
     return Estimation(**doc) if doc else None
+
+
+async def set_status(estimation_id: str, status: str) -> None:
+    """
+    Update the lifecycle status of an estimation.
+
+    :param estimation_id: Estimation UUID string.
+    :param status: New status value — one of 'in_progress', 'done', 'cancelled'.
+    :return: None
+    """
+    await get_database()["estimations"].update_one(
+        {"estimation_id": estimation_id},
+        {"$set": {"status": status}},
+    )
 
 
 async def set_actual_hours(estimation_id: str, actual_hours: float) -> None:

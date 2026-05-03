@@ -88,3 +88,4 @@ class AgentState(TypedDict):
     sprint_hours_per_day: float | None
     sprint_tasks: list[str] | None
     sprint_plan: SprintPlan | None
+    scope: list[str]  # e.g. ["backend", "qa"] — set by handler, used by estimation_node
