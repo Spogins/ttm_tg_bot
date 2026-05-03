@@ -34,6 +34,39 @@ class EstimationResult(TypedDict):
     confidence: Confidence
 
 
+class SprintTaskResult(TypedDict):
+    """
+    A single evaluated task in a sprint plan, with optional API buffer applied.
+    """
+
+    name: str
+    hours: float
+    has_api_buffer: bool
+    complexity: int
+    confidence: Confidence
+
+
+class SprintDay(TypedDict):
+    """
+    One day in the sprint plan with its tasks and total hours.
+    """
+
+    day: int
+    tasks: list[SprintTaskResult]
+    total_hours: float
+
+
+class SprintPlan(TypedDict):
+    """
+    Complete sprint plan output: packed days, totals, project name, and warnings.
+    """
+
+    project_name: str
+    days: list[SprintDay]
+    total_hours: float
+    warnings: list[str]
+
+
 class AgentState(TypedDict):
     """
     Shared state passed between every node of the estimation graph.
@@ -52,3 +85,6 @@ class AgentState(TypedDict):
     formatted_response: str
     tokens_used: Annotated[int, operator.add]  # accumulated across all nodes via reducer
     conversation_history: list[dict]  # last 5 messages loaded from MongoDB
+    sprint_hours_per_day: float | None
+    sprint_tasks: list[str] | None
+    sprint_plan: SprintPlan | None

@@ -52,6 +52,16 @@ def _estimation_text(estimation: Estimation) -> str:
     )
 
 
+def _point_id_from_estimation_id(estimation_id: str) -> int:
+    """
+    Derive a stable int64 Qdrant point ID from an estimation UUID string.
+
+    :param estimation_id: Estimation UUID string.
+    :return: Non-negative int64 point ID.
+    """
+    return abs(hash(estimation_id)) % (2**63)
+
+
 async def index_estimation(estimation: Estimation) -> None:
     """
     Embed and upsert one estimation into the user's Qdrant collection.
@@ -66,8 +76,7 @@ async def index_estimation(estimation: Estimation) -> None:
     vector = await _embed(text)
 
     point = PointStruct(
-        # derive a stable int64 ID from the UUID string; abs() prevents negatives, modulo fits int64 range
-        id=abs(hash(estimation.estimation_id)) % (2**63),
+        id=_point_id_from_estimation_id(estimation.estimation_id),
         vector=vector,
         payload={
             "task": estimation.task,
@@ -107,3 +116,23 @@ async def search_similar(user_id: int, query: str, limit: int = 5) -> list[dict]
     except Exception as e:
         logger.warning(f"Estimation search failed for user {user_id}: {e}")
         return []  # collection absent for new users
+
+
+async def update_actual_hours(estimation_id: str, user_id: int, actual_hours: float) -> None:
+    """
+    Update the actual_hours field in the Qdrant payload for an existing estimation point.
+
+    :param estimation_id: Estimation UUID string.
+    :param user_id: Telegram user ID whose collection to update.
+    :param actual_hours: Real hours the task took.
+    :return: None
+    """
+    collection = _collection(user_id)
+    point_id = _point_id_from_estimation_id(estimation_id)
+    client = get_client()
+    await client.set_payload(
+        collection_name=collection,
+        payload={"actual_hours": actual_hours},
+        points=[point_id],
+    )
+    logger.info(f"Updated actual_hours={actual_hours} for estimation {estimation_id}")

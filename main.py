@@ -17,6 +17,7 @@ from db.mongodb import connect as mongo_connect
 from db.mongodb import disconnect as mongo_disconnect
 from db.qdrant import connect as qdrant_connect
 from db.qdrant import disconnect as qdrant_disconnect
+from services.reminder_scheduler import reminder_scheduler
 
 BOT_COMMANDS = [
     BotCommand(command="start", description="Начать работу"),
@@ -39,6 +40,7 @@ async def run_polling():
     await qdrant_connect()
 
     bot = create_bot()
+    asyncio.create_task(reminder_scheduler(bot))
     dp = create_dispatcher()
 
     await bot.set_my_commands(BOT_COMMANDS)
@@ -62,6 +64,7 @@ async def on_startup(bot, dp):
     """
     await mongo_connect()
     await qdrant_connect()
+    asyncio.create_task(reminder_scheduler(bot))
     await bot.set_my_commands(BOT_COMMANDS)
     await bot.set_webhook(f"{settings.webhook_url}{settings.webhook_path}")
     logger.info(f"Webhook set: {settings.webhook_url}{settings.webhook_path}")

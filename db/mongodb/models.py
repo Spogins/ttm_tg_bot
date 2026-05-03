@@ -82,12 +82,16 @@ class Estimation(BaseModel):
     tech_stack: list[str] = Field(default_factory=list)
     breakdown: dict = Field(default_factory=dict)
     actual_hours: Optional[float] = None
+    reminder_at: Optional[datetime] = None
+    reminder_sent_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=utcnow)
 
-    @field_validator("created_at", mode="before")
+    @field_validator("created_at", "reminder_at", "reminder_sent_at", mode="before")
     @classmethod
     def ensure_utc(cls, v: datetime) -> datetime:
         """Attach UTC timezone to naive datetimes returned by MongoDB."""
+        if v is None:
+            return v
         return _as_utc(v)
 
 
@@ -108,6 +112,29 @@ class Project(BaseModel):
     updated_at: datetime = Field(default_factory=utcnow)
 
     @field_validator("created_at", "updated_at", mode="before")
+    @classmethod
+    def ensure_utc(cls, v: datetime) -> datetime:
+        """Attach UTC timezone to naive datetimes returned by MongoDB."""
+        return _as_utc(v)
+
+
+class Sprint(BaseModel):
+    """
+    Stored sprint plan: per-day task grouping with capacity and warnings.
+    """
+
+    sprint_id: str
+    user_id: int
+    project_id: Optional[str] = None
+    project_name: str = ""
+    hours_per_day: float
+    tasks_input: list[str]
+    days: list[dict]
+    total_hours: float
+    warnings: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utcnow)
+
+    @field_validator("created_at", mode="before")
     @classmethod
     def ensure_utc(cls, v: datetime) -> datetime:
         """Attach UTC timezone to naive datetimes returned by MongoDB."""

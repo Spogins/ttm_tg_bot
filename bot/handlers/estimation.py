@@ -2,18 +2,21 @@
 """
 Handlers for task estimation: graph invocation, clarification loop, and save callback.
 """
+from datetime import datetime, timedelta, timezone
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from loguru import logger
 
-from agent.runner import run_agent
-from bot.keyboards.common import estimation_keyboard
-from bot.states.states import EstimationStates
+from agent.runner import run_agent, run_sprint_agent
+from bot.keyboards.common import estimation_keyboard, sprint_result_keyboard
+from bot.states.states import EstimationStates, SprintStates
 from db.mongodb import estimations as estimations_db
 from db.mongodb import projects as projects_db
-from services.estimation_indexer import index_estimation
+from services.estimation_indexer import index_estimation, update_actual_hours
+from services.sprint_exporter import generate_sprint_markdown
 
 router = Router()
 
@@ -103,6 +106,7 @@ async def cb_save_estimation(callback: CallbackQuery, state: FSMContext):
         breakdown={s["name"]: s["hours"] for s in estimation["subtasks"]},
         project_id=project_id,
         project_name=project.name if project else "",
+        reminder_at=datetime.now(timezone.utc) + timedelta(hours=36),
     )
 
     try:
@@ -155,12 +159,181 @@ async def cb_details_estimation(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.message(Command("sprint"))
-async def cmd_sprint(message: Message):
+@router.callback_query(F.data.startswith("actual:"))
+async def cb_actual_hours_prompt(callback: CallbackQuery, state: FSMContext):
     """
-    Inform the user that the sprint planner is available in a later phase.
+    Store the estimation_id and enter awaiting_actual_hours state.
 
-    :param message: The incoming message object.
+    :param callback: The callback query from the actual-hours button.
+    :param state: The current FSM context.
     :return: None
     """
-    await message.answer("Планировщик спринта будет доступен в следующей версии.")
+    estimation_id = callback.data.split(":", 1)[1]
+    await state.update_data(estimation_id=estimation_id)
+    await state.set_state(EstimationStates.awaiting_actual_hours)
+    await callback.message.answer("Введи реальное время в часах (например: `4.5`):")
+    await callback.answer()
+
+
+@router.message(EstimationStates.awaiting_actual_hours)
+async def handle_actual_hours(message: Message, state: FSMContext):
+    """
+    Validate the actual hours input, persist to MongoDB and Qdrant, then clear state.
+
+    :param message: Message containing the actual hours as text.
+    :param state: The current FSM context with estimation_id stored.
+    :return: None
+    """
+    text = (message.text or "").strip().replace(",", ".")
+    try:
+        hours = float(text)
+        if hours <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("⚠️ Введи положительное число, например `4.5`.")
+        return
+
+    data = await state.get_data()
+    estimation_id = data.get("estimation_id")
+    user_id = message.from_user.id
+
+    await estimations_db.set_actual_hours(estimation_id, hours)
+
+    try:
+        estimation = await estimations_db.get_estimation(estimation_id)
+        if estimation:
+            await update_actual_hours(estimation_id, user_id, hours)
+    except Exception as e:
+        logger.warning(f"Qdrant actual_hours update failed for {estimation_id}: {e}")
+
+    await state.clear()
+    await message.answer(f"✅ Записано! *{hours} ч* реального времени.", parse_mode="Markdown")
+
+
+@router.callback_query(F.data == "sprint:export")
+async def cb_export_sprint(callback: CallbackQuery, state: FSMContext):
+    """
+    Generate a Markdown file from the last sprint plan and send it as a document.
+
+    :param callback: The callback query from the export button.
+    :param state: FSM context holding last_sprint_plan and last_sprint_hours.
+    :return: None
+    """
+    data = await state.get_data()
+    sprint_plan = data.get("last_sprint_plan")
+
+    if not sprint_plan:
+        await callback.answer("Нет данных для экспорта.", show_alert=True)
+        return
+
+    hours_per_day = data.get("last_sprint_hours", 8.0)
+    content = generate_sprint_markdown(sprint_plan, hours_per_day)
+    project_name = sprint_plan.get("project_name", "sprint")
+    safe_name = project_name.replace(" ", "_") or "sprint"
+    filename = f"{safe_name}_plan.md"
+
+    await callback.message.answer_document(
+        BufferedInputFile(content.encode("utf-8"), filename=filename),
+        caption="📤 Sprint Plan в Markdown",
+    )
+    await state.clear()
+    await callback.answer()
+
+
+@router.message(Command("sprint"))
+async def cmd_sprint(message: Message, state: FSMContext):
+    """
+    Enter sprint planning: ask for daily capacity in hours.
+
+    :param message: The incoming /sprint command message.
+    :param state: The current FSM context.
+    :return: None
+    """
+    await state.set_state(SprintStates.awaiting_hours)
+    await message.answer(
+        "📅 *Sprint Planner*\n\n"
+        "Сколько рабочих часов в день у тебя в этом спринте?\n"
+        "Введи число (например: `6` или `7.5`)"
+    )
+
+
+@router.message(SprintStates.awaiting_hours)
+async def handle_sprint_hours(message: Message, state: FSMContext):
+    """
+    Validate and store daily hours, then ask for the task list.
+
+    :param message: Message containing hours per day as text.
+    :param state: The current FSM context.
+    :return: None
+    """
+    text = (message.text or "").strip().replace(",", ".")
+    try:
+        hours = float(text)
+        if not (1.0 <= hours <= 24.0):
+            raise ValueError
+    except ValueError:
+        await message.answer("⚠️ Введи число от 1 до 24. Например: `6` или `7.5`")
+        return
+
+    await state.update_data(sprint_hours_per_day=hours)
+    await state.set_state(SprintStates.awaiting_tasks)
+    await message.answer(
+        f"✅ Capacity: *{hours} ч/день*\n\n"
+        "Отправь список задач — каждую с новой строки (максимум 10):\n\n"
+        "Пример:\n"
+        "Фикс токенов\n"
+        "Фильтрация заказов\n"
+        "Nova Poshta интеграция"
+    )
+
+
+@router.message(SprintStates.awaiting_tasks)
+async def handle_sprint_tasks(message: Message, state: FSMContext, user=None):
+    """
+    Validate the task list, run sprint_planner_node, and display the plan.
+
+    :param message: Message containing newline-separated task descriptions.
+    :param state: The current FSM context with sprint_hours_per_day stored.
+    :param user: Injected User object from UserMiddleware.
+    :return: None
+    """
+    raw = message.text or ""
+    tasks = [line.strip() for line in raw.splitlines() if line.strip()]
+
+    if not tasks:
+        await message.answer("⚠️ Список задач пустой. Напиши задачи, каждую с новой строки.")
+        return
+
+    if len(tasks) > 10:
+        await message.answer(
+            f"⚠️ Слишком много задач ({len(tasks)}). Максимум 10 за один спринт.\n" "Сократи список и попробуй снова."
+        )
+        return
+
+    data = await state.get_data()
+    hours_per_day: float = data.get("sprint_hours_per_day", 8.0)
+    user_id = message.from_user.id
+    project_id = user.active_project_id if user else None
+
+    progress = await message.answer(f"⏳ Оцениваю {len(tasks)} задач...")
+
+    result = await run_sprint_agent(
+        user_id=user_id,
+        project_id=project_id,
+        hours_per_day=hours_per_day,
+        tasks=tasks,
+    )
+
+    sprint_plan = result.get("sprint_plan")
+    if sprint_plan:
+        await state.set_state(None)
+        await state.update_data(last_sprint_plan=sprint_plan, last_sprint_hours=hours_per_day)
+        keyboard = sprint_result_keyboard()
+    else:
+        await state.clear()
+        keyboard = None
+
+    await progress.edit_text(
+        result.get("formatted_response", "❌ Не удалось сформировать план."),
+        reply_markup=keyboard,
+    )

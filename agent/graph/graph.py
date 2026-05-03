@@ -27,9 +27,15 @@ def _route_intent(state: AgentState) -> str:
     """
     Map intent to the next node name after intent_classifier.
 
+    Sprint is detected by the presence of pre-loaded sprint_tasks rather than
+    the intent field, because run_sprint_agent passes an empty user_input which
+    would cause intent_classifier to return 'unknown'.
+
     :param state: Current agent state with intent already set.
     :return: Node name string for the conditional edge.
     """
+    if state.get("sprint_tasks"):
+        return "sprint_planner"
     intent = state.get("intent", "unknown")
     if intent == "estimate":
         return "project_context"
@@ -37,7 +43,7 @@ def _route_intent(state: AgentState) -> str:
         return "project_manager"
     if intent == "sprint":
         return "sprint_planner"
-    return "fallback"  # covers history and unknown
+    return "fallback"
 
 
 def _route_clarification(state: AgentState) -> str:

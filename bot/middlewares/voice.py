@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Middleware that transparently transcribes voice messages before they reach handlers.
 """
@@ -5,23 +6,32 @@ import tempfile
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
-from aiogram.types import Message, ContentType
+from aiogram.types import ContentType, Message
 from loguru import logger
 
 from services.transcription import transcribe
 
 
 class VoiceTranscriptionMiddleware(BaseMiddleware):
-    """
-    Download and transcribe voice messages, then replace event.text with the result.
+    """Download and transcribe voice messages, replacing event.text with the result.
+
     Non-voice messages are passed through unchanged.
     """
+
     async def __call__(
         self,
         handler: Callable[[Message, dict[str, Any]], Awaitable[Any]],
         event: Message,
         data: dict[str, Any],
     ) -> Any:
+        """
+        Intercept voice messages, transcribe them, and inject the transcript as event.text.
+
+        :param handler: The next handler in the middleware chain.
+        :param event: The incoming Telegram message.
+        :param data: Shared handler data dict (contains 'bot').
+        :return: Result of the next handler, or None if transcription fails.
+        """
         if event.content_type != ContentType.VOICE:
             return await handler(event, data)
 

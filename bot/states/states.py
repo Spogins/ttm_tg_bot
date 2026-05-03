@@ -25,3 +25,12 @@ class EstimationStates(StatesGroup):
     clarifying = State()
     confirming = State()
     awaiting_actual_hours = State()
+
+
+class SprintStates(StatesGroup):
+    """
+    States for the sprint planning conversation flow.
+    """
+
+    awaiting_hours = State()
+    awaiting_tasks = State()
