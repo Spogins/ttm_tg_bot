@@ -13,7 +13,7 @@ dep = next((f for f in ['requirements.txt', 'requirements-dev.txt', 'requirement
 tech = sorted(set(re.split(r'[~>=<!]', l)[0].split('[')[0].strip() for l in open(dep) if l.strip() and not l.startswith(('#', '-', '[')))) if dep else []; \
 print(json.dumps({'tech_stack': tech, 'files': files}, indent=2))" > structure.json
 
-.PHONY: migrate migrations
+.PHONY: migrate migrations docker-build docker-up docker-down docker-logs docker-restart docker-migrate docker-shell docker-clean
 
 migrate:
 	python scripts/migrate.py
@@ -21,3 +21,35 @@ migrate:
 migrations:
 	@test -n "$(name)" || (echo "Usage: make migrations name=<migration_name>"; exit 1)
 	python scripts/migrate.py --create $(name)
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+
+docker-build:
+	docker compose build
+
+docker-up:
+	docker compose up -d
+
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f bot
+
+docker-restart:
+	docker compose restart bot
+
+docker-migrate:
+	docker compose exec bot python scripts/migrate.py
+
+docker-shell:
+	docker compose exec bot bash
+
+docker-clean:
+	docker compose down -v --remove-orphans
+
+docker-run:
+	! docker compose up -d --build bot
+
+docker-stop:
+	! docker compose stop bot

@@ -175,6 +175,14 @@ async def handle_update_stack(message: Message, state: FSMContext):
         await message.answer("Ошибка: проект не найден. Начните заново.")
         return
 
+    if message.text.strip() == "/skip":
+        project = await projects_db.get_project(project_id)
+        existing_stack = project.tech_stack if project else []
+        await projects_db.update_project(project_id, description=description)
+        stack_str = ", ".join(existing_stack) or "—"
+        await message.answer(f"✅ Описание обновлено.\nТехнологии без изменений: {stack_str}")
+        return
+
     msg = await message.answer("Анализирую стек через Claude ✨")
     tech_stack = await extract_tech_stack(message.text.strip(), description)
     parsed = ParsedProject(files=[], tech_stack=tech_stack, modules=[], raw={"description": description})
@@ -190,7 +198,7 @@ async def handle_update_stack(message: Message, state: FSMContext):
         files_indexed=count,
     )
 
-    await msg.edit_text(f"✅ Структура обновлена.\n" f"Технологии: {', '.join(parsed.tech_stack) or '—'}")
+    await msg.edit_text(f"✅ Структура обновлена.\nТехнологии: {', '.join(parsed.tech_stack) or '—'}")
 
 
 @router.callback_query(F.data.startswith("delete_project:"))

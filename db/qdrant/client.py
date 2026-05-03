@@ -1,9 +1,10 @@
+# -*- coding: utf-8 -*-
 """
 Async Qdrant client singleton with collection management helpers.
 """
+from loguru import logger
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import Distance, VectorParams
-from loguru import logger
 
 from config.settings import settings
 
@@ -29,8 +30,10 @@ async def connect() -> None:
     """
     global _client
     _client = AsyncQdrantClient(
-        url=f"https://{settings.qdrant_host}",
-        api_key=settings.qdrant_api_key or None,  # empty string → None so the client skips auth headers
+        host=settings.qdrant_host,
+        port=settings.qdrant_port,
+        https=False,
+        api_key=settings.qdrant_api_key or None,
     )
     await _client.get_collections()  # lightweight call to confirm connectivity
     logger.info("Qdrant connected")
