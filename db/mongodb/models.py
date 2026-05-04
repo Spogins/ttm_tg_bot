@@ -76,6 +76,7 @@ class Estimation(BaseModel):
     user_id: int
     project_id: Optional[str] = None
     project_name: str = ""
+    task_name: str = ""
     task: str
     total_hours: float
     complexity: int  # 1–5

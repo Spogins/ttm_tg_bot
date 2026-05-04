@@ -24,6 +24,7 @@ class EstimationStates(StatesGroup):
     """
 
     selecting_scope = State()
+    awaiting_task_name = State()
     awaiting_task = State()
     clarifying = State()
     selecting_mode = State()

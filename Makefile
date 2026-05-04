@@ -49,7 +49,7 @@ docker-clean:
 	docker compose down -v --remove-orphans
 
 docker-run:
-	! docker compose up -d --build bot
+	docker compose up -d --build bot
 
 docker-stop:
-	! docker compose stop bot
+	docker compose stop bot

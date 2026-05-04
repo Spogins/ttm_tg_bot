@@ -139,9 +139,27 @@ async def cb_scope_continue(callback: CallbackQuery, state: FSMContext, user=Non
     if user and user.active_project_id:
         await projects_db.update_project(user.active_project_id, default_scope=scope)
 
-    await state.set_state(EstimationStates.awaiting_task)
-    await callback.message.edit_text("Опишите задачу, которую нужно оценить.\nМожно голосовым сообщением или текстом.")
+    await state.set_state(EstimationStates.awaiting_task_name)
+    await callback.message.edit_text("Введите название задачи:")
     await callback.answer()
+
+
+@router.message(EstimationStates.awaiting_task_name)
+async def handle_task_name_input(message: Message, state: FSMContext):
+    """
+    Handle the user's input for the task name.
+
+    :param message:
+    :param state:
+    :return:
+    """
+    name = (message.text or "").strip()
+    if not name:
+        await message.answer("Название не может быть пустым. Введите название задачи:")
+        return
+    await state.update_data(pending_task_name=name)
+    await state.set_state(EstimationStates.awaiting_task)
+    await message.answer("Опишите задачу, которую нужно оценить.\nМожно голосовым сообщением или текстом.")
 
 
 async def _run_task(
@@ -331,12 +349,14 @@ async def cb_breakdown_confirm(callback: CallbackQuery, state: FSMContext):
     mode = data.get("pending_mode", "realistic")
     scope = data.get("pending_scope", [])
     task = data.get("pending_task", "")
+    task_name = data.get("pending_task_name", "")
     project_id = data.get("pending_project_id")
 
     project = await projects_db.get_project(project_id) if project_id else None
     saved = await estimations_db.save_estimation(
         user_id=user_id,
         task=task,
+        task_name=task_name,
         total_hours=total_hours,
         complexity=estimation["complexity"],
         tech_stack=project.tech_stack if project else [],

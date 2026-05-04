@@ -125,7 +125,8 @@ def history_keyboard(estimations: list) -> InlineKeyboardMarkup:
     """
     buttons = []
     for i, e in enumerate(estimations, 1):
-        label = (e.task[:30] + "…") if len(e.task) > 30 else e.task
+        raw = e.task_name if getattr(e, "task_name", "") else e.task
+        label = (raw[:30] + "…") if len(raw) > 30 else raw
         buttons.append(
             [
                 InlineKeyboardButton(

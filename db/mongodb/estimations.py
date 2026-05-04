@@ -22,6 +22,7 @@ async def save_estimation(
     reminder_at: "datetime | None" = None,
     scope: list[str] | None = None,
     estimation_mode: str = "realistic",
+    task_name: str = "",
 ) -> Estimation:
     """
     Create a new estimation document with a generated UUID and persist it.
@@ -41,6 +42,7 @@ async def save_estimation(
         user_id=user_id,
         project_id=project_id,
         project_name=project_name,
+        task_name=task_name,
         task=task,
         total_hours=total_hours,
         complexity=complexity,
