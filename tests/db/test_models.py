@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from db.mongodb.models import Estimation, Project, Sprint, User, UserTokens, _as_utc
 
@@ -143,3 +146,17 @@ class TestSprintModel:
             created_at=datetime(2026, 1, 1),
         )
         assert s.created_at.tzinfo == timezone.utc
+
+
+@pytest.mark.asyncio
+async def test_delete_estimation_calls_delete_one():
+    mock_col = AsyncMock()
+    mock_db = MagicMock()
+    mock_db.__getitem__ = MagicMock(return_value=mock_col)
+
+    with patch("db.mongodb.estimations.get_database", return_value=mock_db):
+        from db.mongodb.estimations import delete_estimation
+
+        await delete_estimation("test-uuid")
+
+    mock_col.delete_one.assert_awaited_once_with({"estimation_id": "test-uuid"})

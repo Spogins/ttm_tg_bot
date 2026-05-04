@@ -229,3 +229,13 @@ async def mark_reminder_sent(estimation_id: str) -> None:
         {"estimation_id": estimation_id},
         {"$set": {"reminder_sent_at": now}},
     )
+
+
+async def delete_estimation(estimation_id: str) -> None:
+    """
+    Delete an estimation document by UUID.
+
+    :param estimation_id: Estimation UUID string.
+    :return: None
+    """
+    await get_database()["estimations"].delete_one({"estimation_id": estimation_id})

@@ -14,6 +14,7 @@ from loguru import logger
 from bot.keyboards.common import (
     MAIN_KB_BUTTONS,
     actual_hours_keyboard,
+    confirm_delete_estimation_keyboard,
     history_keyboard,
     main_keyboard,
     start_keyboard,
@@ -358,7 +359,8 @@ def _estimation_detail_keyboard(estimation_id: str, estimation) -> InlineKeyboar
     Build the action keyboard for an estimation detail card.
 
     Includes status toggle row, actual-hours entry (when missing),
-    and save-as-template button (only when actual_hours is already recorded).
+    save-as-template button (only when actual_hours is already recorded),
+    and a delete button.
 
     :param estimation_id: UUID of the estimation.
     :param estimation: Estimation instance.
@@ -371,6 +373,7 @@ def _estimation_detail_keyboard(estimation_id: str, estimation) -> InlineKeyboar
         rows.append(
             [InlineKeyboardButton(text="📌 Сохранить как шаблон", callback_data=f"save_template:{estimation_id}")]
         )
+    rows.append([InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_estimation:{estimation_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -519,3 +522,71 @@ async def handle_template_name(message: Message, state: FSMContext, user=None):
         f"({sign}{deviation_pct}%)",
         parse_mode="HTML",
     )
+
+
+@router.callback_query(F.data.startswith("delete_estimation:"))
+async def cb_delete_estimation_prompt(callback: CallbackQuery):
+    """
+    Show an in-place confirmation prompt when the user taps the delete button.
+
+    Performs an ownership check before displaying the prompt.
+
+    :param callback: Callback query carrying 'delete_estimation:<estimation_id>'.
+    :return: None
+    """
+    estimation_id = callback.data.split(":", 1)[1]
+    estimation = await estimations_db.get_estimation(estimation_id)
+    if not estimation or estimation.user_id != callback.from_user.id:
+        await callback.answer("Оценка не найдена.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "Удалить эту оценку? Действие необратимо.",
+        reply_markup=confirm_delete_estimation_keyboard(estimation_id),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("confirm_delete_estimation:"))
+async def cb_delete_estimation_confirm(callback: CallbackQuery):
+    """
+    Delete the estimation from Qdrant and MongoDB after the user confirms.
+
+    Performs an ownership check before deletion.
+
+    :param callback: Callback query carrying 'confirm_delete_estimation:<estimation_id>'.
+    :return: None
+    """
+    from services.estimation_indexer import delete_estimation_from_index
+
+    estimation_id = callback.data.split(":", 1)[1]
+    estimation = await estimations_db.get_estimation(estimation_id)
+    if not estimation or estimation.user_id != callback.from_user.id:
+        await callback.answer("Оценка не найдена.", show_alert=True)
+        return
+    await delete_estimation_from_index(estimation_id, estimation.user_id)
+    await estimations_db.delete_estimation(estimation_id)
+    await callback.message.edit_text("✅ Оценка удалена.", reply_markup=None)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("cancel_delete_estimation:"))
+async def cb_delete_estimation_cancel(callback: CallbackQuery):
+    """
+    Restore the original estimation card when the user cancels the delete confirmation.
+
+    Performs an ownership check before restoring the card.
+
+    :param callback: Callback query carrying 'cancel_delete_estimation:<estimation_id>'.
+    :return: None
+    """
+    estimation_id = callback.data.split(":", 1)[1]
+    estimation = await estimations_db.get_estimation(estimation_id)
+    if not estimation or estimation.user_id != callback.from_user.id:
+        await callback.answer("Оценка не найдена.", show_alert=True)
+        return
+    reply_markup = _estimation_detail_keyboard(estimation_id, estimation)
+    await callback.message.edit_text(
+        _format_estimation_detail(estimation), parse_mode="HTML", reply_markup=reply_markup
+    )
+    await callback.answer()

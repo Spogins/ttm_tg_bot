@@ -85,6 +85,27 @@ def confirm_delete_keyboard(project_id: str) -> InlineKeyboardMarkup:
     )
 
 
+def confirm_delete_estimation_keyboard(estimation_id: str) -> InlineKeyboardMarkup:
+    """
+    Return a yes/cancel keyboard for the estimation delete-confirmation prompt.
+
+    :param estimation_id: UUID of the estimation to be deleted.
+    :return: InlineKeyboardMarkup with confirm and cancel buttons.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Да, удалить", callback_data=f"confirm_delete_estimation:{estimation_id}"
+                ),  # noqa
+                InlineKeyboardButton(
+                    text="❌ Отмена", callback_data=f"cancel_delete_estimation:{estimation_id}"  # noqa
+                ),  # noqa
+            ]
+        ]
+    )
+
+
 def sprint_result_keyboard() -> InlineKeyboardMarkup:
     """
     Return a keyboard shown after a sprint plan with an export-to-Markdown button.

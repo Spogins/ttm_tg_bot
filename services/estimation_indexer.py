@@ -148,3 +148,21 @@ async def update_actual_hours(estimation_id: str, user_id: int, actual_hours: fl
         points=[point_id],
     )
     logger.info(f"Updated actual_hours={actual_hours} for estimation {estimation_id}")
+
+
+async def delete_estimation_from_index(estimation_id: str, user_id: int) -> None:
+    """
+    Delete an estimation point from the user's Qdrant collection.
+
+    :param estimation_id: Estimation UUID string.
+    :param user_id: Telegram user ID whose collection to update.
+    :return: None
+    """
+    collection = _collection(user_id)
+    point_id = _point_id_from_estimation_id(estimation_id)
+    client = get_client()
+    try:
+        await client.delete(collection_name=collection, points_selector=[point_id])
+        logger.info(f"Deleted estimation {estimation_id} from index for user {user_id}")
+    except Exception as e:
+        logger.warning(f"Qdrant deletion failed for estimation {estimation_id}: {e}")

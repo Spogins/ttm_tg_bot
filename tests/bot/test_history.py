@@ -79,3 +79,35 @@ class TestFormatHistory:
         text = _format_history([est])
         assert "…" in text
         assert "A" * 60 not in text
+
+
+from bot.handlers.common import _estimation_detail_keyboard
+
+
+def _make_est(estimation_id="eid-1", actual_hours=None):
+    return Estimation(
+        estimation_id=estimation_id,
+        user_id=1,
+        task="Some task",
+        total_hours=5.0,
+        complexity=2,
+        actual_hours=actual_hours,
+        created_at=datetime(2026, 5, 4, tzinfo=timezone.utc),
+    )
+
+
+class TestEstimationDetailKeyboard:
+    def test_has_delete_button(self):
+        kb = _estimation_detail_keyboard("eid-1", _make_est())
+        all_callbacks = [btn.callback_data for row in kb.inline_keyboard for btn in row]
+        assert any(cb.startswith("delete_estimation:") for cb in all_callbacks)
+
+    def test_delete_button_contains_estimation_id(self):
+        kb = _estimation_detail_keyboard("eid-1", _make_est())
+        all_callbacks = [btn.callback_data for row in kb.inline_keyboard for btn in row]
+        assert "delete_estimation:eid-1" in all_callbacks
+
+    def test_delete_button_is_last_row(self):
+        kb = _estimation_detail_keyboard("eid-1", _make_est())
+        last_row = kb.inline_keyboard[-1]
+        assert last_row[0].callback_data.startswith("delete_estimation:")

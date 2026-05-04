@@ -108,3 +108,23 @@ class TestSprintResultKeyboard:
 
     def test_export_callback(self):
         assert sprint_result_keyboard().inline_keyboard[0][0].callback_data == "sprint:export"
+
+
+class TestConfirmDeleteEstimationKeyboard:
+    def test_has_two_buttons(self):
+        from bot.keyboards.common import confirm_delete_estimation_keyboard
+
+        kb = confirm_delete_estimation_keyboard("est-123")
+        assert len(kb.inline_keyboard[0]) == 2
+
+    def test_confirm_callback_contains_estimation_id(self):
+        from bot.keyboards.common import confirm_delete_estimation_keyboard
+
+        kb = confirm_delete_estimation_keyboard("est-123")
+        assert kb.inline_keyboard[0][0].callback_data == "confirm_delete_estimation:est-123"
+
+    def test_cancel_callback(self):
+        from bot.keyboards.common import confirm_delete_estimation_keyboard
+
+        kb = confirm_delete_estimation_keyboard("est-123")
+        assert kb.inline_keyboard[0][1].callback_data == "cancel_delete_estimation:est-123"
